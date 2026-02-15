@@ -1,0 +1,14 @@
+CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_group ON expenses(group_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_trip ON expenses(trip_id);
+CREATE INDEX IF NOT EXISTS idx_expense_payers_expense ON expense_payers(expense_id);
+CREATE INDEX IF NOT EXISTS idx_expense_splits_expense ON expense_splits(expense_id);
+CREATE INDEX IF NOT EXISTS idx_expense_splits_user ON expense_splits(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_group ON payments(group_id);
+CREATE INDEX IF NOT EXISTS idx_payments_payer ON payments(payer_id);
+CREATE INDEX IF NOT EXISTS idx_payments_payee ON payments(payee_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_activity_log_group ON activity_log(group_id);
+CREATE INDEX IF NOT EXISTS idx_invite_links_token ON group_invite_links(token);

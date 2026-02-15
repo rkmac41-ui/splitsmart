@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: splitsmart
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DB_PATH
+        value: /opt/render/project/data/splitsmart.db
+    disk:
+      name: splitsmart-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1
