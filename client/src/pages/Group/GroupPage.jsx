@@ -26,6 +26,7 @@ export default function GroupPage() {
   const [expenses, setExpenses] = useState([]);
   const [trips, setTrips] = useState([]);
   const [balances, setBalances] = useState(null);
+  const [detailedBalances, setDetailedBalances] = useState(null);
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('expenses');
@@ -44,13 +45,14 @@ export default function GroupPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [gData, mData, eData, tData, bData, aData] = await Promise.all([
+      const [gData, mData, eData, tData, bData, aData, dData] = await Promise.all([
         groupsApi.getGroup(groupId),
         groupsApi.getGroupMembers(groupId),
         expensesApi.getExpenses(groupId),
         tripsApi.getTrips(groupId),
         balancesApi.getGroupBalances(groupId),
         balancesApi.getGroupActivity(groupId, 30),
+        balancesApi.getDetailedBalances(groupId),
       ]);
       setGroup(gData.group);
       setMembers(mData.members);
@@ -58,6 +60,7 @@ export default function GroupPage() {
       setTrips(tData.trips);
       setBalances(bData);
       setActivity(aData.activities);
+      setDetailedBalances(dData);
     } catch (err) {
       showToast('Failed to load group', 'error');
     } finally {
@@ -222,36 +225,12 @@ export default function GroupPage() {
                 </button>
               </div>
             ) : (
-              expenses.map(expense => {
-                const cat = getCategoryByKey(expense.category);
-                return (
-                  <div key={expense.id} className={styles.expenseItem}>
-                    <span className={styles.expenseCat}>{cat.emoji}</span>
-                    <div className={styles.expenseInfo}>
-                      <span className={styles.expenseDesc}>{expense.description}</span>
-                      <span className={styles.expenseMeta}>
-                        {formatDate(expense.date)} &middot; Paid by {expense.payers.map(p => p.user_name).join(', ')}
-                        {expense.trip_id && (
-                          <span className={styles.tripBadge}>
-                            {trips.find(t => t.id === expense.trip_id)?.name || 'Trip'}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className={styles.expenseRight}>
-                      <span className={styles.expenseAmount}>{formatCurrency(expense.amount)}</span>
-                      <div className={styles.expenseActions}>
-                        <button className={styles.editBtn} onClick={() => setEditingExpense(expense)} title="Edit">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                        </button>
-                        <button className={styles.deleteBtn} onClick={() => handleDeleteExpense(expense.id)} title="Delete">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
+              <ExpensesByTrip
+                expenses={expenses}
+                trips={trips}
+                onEdit={setEditingExpense}
+                onDelete={handleDeleteExpense}
+              />
             )}
           </div>
         )}
@@ -275,7 +254,9 @@ export default function GroupPage() {
             </div>
             <BalanceList
               balances={balances?.balances}
+              memberBalances={balances?.memberBalances}
               onSettleUp={(debt) => setShowSettleUp(debt)}
+              detailedMembers={detailedBalances?.members}
             />
           </div>
         )}
@@ -586,6 +567,90 @@ function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInv
         width: '100%', padding: '10px', background: 'none', border: '1px solid var(--color-danger)',
         color: 'var(--color-danger)', borderRadius: 8, fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer'
       }}>Leave Group</button>
+    </div>
+  );
+}
+
+function ExpensesByTrip({ expenses, trips, onEdit, onDelete }) {
+  // Group expenses by trip
+  const tripMap = {};
+  for (const t of trips) {
+    tripMap[t.id] = t.name;
+  }
+
+  const grouped = {};
+  for (const expense of expenses) {
+    const key = expense.trip_id || '__none__';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(expense);
+  }
+
+  // Order: trips first (by name), then ungrouped at the end
+  const tripKeys = Object.keys(grouped).filter(k => k !== '__none__').sort((a, b) => {
+    const nameA = tripMap[a] || '';
+    const nameB = tripMap[b] || '';
+    return nameA.localeCompare(nameB);
+  });
+  const orderedKeys = [...tripKeys];
+  if (grouped.__none__) orderedKeys.push('__none__');
+
+  // If no trips at all, just show flat list
+  if (orderedKeys.length === 1 && orderedKeys[0] === '__none__') {
+    return grouped.__none__.map(expense => (
+      <ExpenseRow key={expense.id} expense={expense} onEdit={onEdit} onDelete={onDelete} />
+    ));
+  }
+
+  return orderedKeys.map(key => {
+    const exps = grouped[key];
+    const tripName = key === '__none__' ? 'General (no trip)' : tripMap[key] || 'Trip';
+    const tripTotal = exps.reduce((sum, e) => sum + e.amount, 0);
+
+    return (
+      <div key={key} className={styles.tripGroup}>
+        <div className={styles.tripGroupHeader}>
+          <div className={styles.tripGroupTitle}>
+            {key !== '__none__' && (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/>
+              </svg>
+            )}
+            <span>{tripName}</span>
+          </div>
+          <span className={styles.tripGroupTotal}>
+            {exps.length} expense{exps.length !== 1 ? 's' : ''} &middot; {formatCurrency(tripTotal)}
+          </span>
+        </div>
+        {exps.map(expense => (
+          <ExpenseRow key={expense.id} expense={expense} onEdit={onEdit} onDelete={onDelete} />
+        ))}
+      </div>
+    );
+  });
+}
+
+function ExpenseRow({ expense, onEdit, onDelete }) {
+  const cat = getCategoryByKey(expense.category);
+  return (
+    <div className={styles.expenseItem}>
+      <span className={styles.expenseCat}>{cat.emoji}</span>
+      <div className={styles.expenseInfo}>
+        <span className={styles.expenseDesc}>{expense.description}</span>
+        <span className={styles.expenseMeta}>
+          {formatDate(expense.date)} &middot; Paid by {expense.payers.map(p => p.user_name).join(', ')}
+        </span>
+      </div>
+      <div className={styles.expenseRight}>
+        <span className={styles.expenseAmount}>{formatCurrency(expense.amount)}</span>
+        <div className={styles.expenseActions}>
+          <button className={styles.editBtn} onClick={() => onEdit(expense)} title="Edit">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button className={styles.deleteBtn} onClick={() => onDelete(expense.id)} title="Delete">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

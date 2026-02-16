@@ -34,17 +34,20 @@ export default function ExpenseForm({ members, trips, expense, onSubmit, onCance
         included: true,
       })));
     } else {
-      // Defaults for new expense
+      // Defaults for new expense — no members pre-selected for split
       setPayers([{ user_id: user.id, amount: '' }]);
-      setSplits(members.map(m => ({ user_id: m.id, share_value: null, included: true })));
+      setSplits(members.map(m => ({ user_id: m.id, share_value: null, included: false })));
     }
   }, [expense, members, user]);
 
   const amountCents = dollarsToCents(amount);
 
+  const includedSplitCount = splits.filter(s => s.included !== false).length;
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!description.trim() || !amountCents || amountCents <= 0) return;
+    if (includedSplitCount === 0) return;
 
     // Build payers array (convert to cents)
     const payerData = payers
@@ -186,7 +189,7 @@ export default function ExpenseForm({ members, trips, expense, onSubmit, onCance
         <button
           type="submit"
           className={styles.submitBtn}
-          disabled={loading || !description.trim() || !amountCents}
+          disabled={loading || !description.trim() || !amountCents || includedSplitCount === 0}
         >
           {loading ? 'Saving...' : expense ? 'Update Expense' : 'Add Expense'}
         </button>

@@ -3,6 +3,9 @@ import client from './client';
 export const getGroupBalances = (groupId) =>
   client.get(`/groups/${groupId}/balances`).then(r => r.data);
 
+export const getDetailedBalances = (groupId) =>
+  client.get(`/groups/${groupId}/balances/details`).then(r => r.data);
+
 export const getDashboard = () =>
   client.get('/dashboard').then(r => r.data);
 

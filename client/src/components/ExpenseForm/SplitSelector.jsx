@@ -23,6 +23,17 @@ export default function SplitSelector({
   };
 
   const includedCount = splits.filter(s => s.included !== false).length;
+  const allSelected = includedCount === members.length;
+
+  const handleSelectAll = () => {
+    const updated = splits.map(s => ({ ...s, included: true }));
+    onChange(updated);
+  };
+
+  const handleDeselectAll = () => {
+    const updated = splits.map(s => ({ ...s, included: false, share_value: null }));
+    onChange(updated);
+  };
 
   const getSplitSummary = () => {
     if (!totalAmount || totalAmount <= 0) return '';
@@ -73,7 +84,17 @@ export default function SplitSelector({
         ))}
       </div>
 
-      <div className={styles.summary}>{getSplitSummary()}</div>
+      <div className={styles.summary}>
+        <span>{getSplitSummary()}</span>
+        {includedCount === 0 && <span className={styles.noSelection}>Select who to split with</span>}
+      </div>
+
+      <div className={styles.selectControls}>
+        <button type="button" className={styles.selectAllBtn} onClick={allSelected ? handleDeselectAll : handleSelectAll}>
+          {allSelected ? 'Deselect all' : 'Select all'}
+        </button>
+        {includedCount > 0 && <span className={styles.selectedCount}>{includedCount} selected</span>}
+      </div>
 
       <div className={styles.memberList}>
         {members.map(m => {

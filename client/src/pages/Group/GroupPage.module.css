@@ -333,6 +333,40 @@
   margin-top: 2px;
 }
 
+/* Trip-grouped expenses */
+.tripGroup {
+  margin-bottom: var(--space-lg);
+}
+
+.tripGroup:last-child {
+  margin-bottom: 0;
+}
+
+.tripGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-sm);
+}
+
+.tripGroupTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+}
+
+.tripGroupTotal {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
 /* Empty state */
 .empty {
   text-align: center;

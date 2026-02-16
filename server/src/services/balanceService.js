@@ -199,4 +199,120 @@ function computeDashboardBalances(userId) {
   };
 }
 
-module.exports = { computeGroupBalances, computeDashboardBalances };
+/**
+ * Compute detailed per-member breakdown for a group.
+ * For each member: their total paid, total share owed, and the list of expenses involved.
+ */
+function computeDetailedBreakdown(groupId) {
+  // Real members
+  const realMembers = db.prepare(`
+    SELECT u.id, u.name FROM group_members gm
+    JOIN users u ON u.id = gm.user_id
+    WHERE gm.group_id = ?
+  `).all(groupId);
+
+  const placeholders = db.prepare(`
+    SELECT id, name FROM placeholder_members
+    WHERE group_id = ? AND claimed_by IS NULL
+  `).all(groupId);
+
+  const members = [
+    ...realMembers,
+    ...placeholders.map(p => ({ id: -p.id, name: p.name })),
+  ];
+
+  const memberMap = {};
+  for (const m of members) memberMap[m.id] = m.name;
+
+  // Get all active expenses with payer/split details
+  const expenses = db.prepare(`
+    SELECT e.id, e.description, e.amount, e.category, e.date, e.trip_id,
+      e.created_by, u.name as created_by_name
+    FROM expenses e
+    JOIN users u ON u.id = e.created_by
+    WHERE e.group_id = ? AND e.is_deleted = 0
+    ORDER BY e.date DESC, e.created_at DESC
+  `).all(groupId);
+
+  const detailedExpenses = expenses.map(e => {
+    const payers = db.prepare(`
+      SELECT ep.user_id, ep.amount,
+        CASE WHEN ep.user_id > 0 THEN u.name
+             ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -ep.user_id)
+        END as user_name
+      FROM expense_payers ep
+      LEFT JOIN users u ON u.id = ep.user_id
+      WHERE ep.expense_id = ?
+    `).all(e.id);
+
+    const splits = db.prepare(`
+      SELECT es.user_id, es.amount, es.share_value,
+        CASE WHEN es.user_id > 0 THEN u.name
+             ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -es.user_id)
+        END as user_name
+      FROM expense_splits es
+      LEFT JOIN users u ON u.id = es.user_id
+      WHERE es.expense_id = ?
+    `).all(e.id);
+
+    return { ...e, payers, splits };
+  });
+
+  // Compute per-member summary
+  const memberDetails = members.map(m => {
+    let totalPaid = 0;
+    let totalShare = 0;
+    const involvedExpenses = [];
+
+    for (const exp of detailedExpenses) {
+      const payer = exp.payers.find(p => p.user_id === m.id);
+      const split = exp.splits.find(s => s.user_id === m.id);
+
+      if (payer || split) {
+        const paid = payer ? payer.amount : 0;
+        const share = split ? split.amount : 0;
+        totalPaid += paid;
+        totalShare += share;
+
+        involvedExpenses.push({
+          id: exp.id,
+          description: exp.description,
+          total_amount: exp.amount,
+          date: exp.date,
+          category: exp.category,
+          paid: paid,
+          share: share,
+          net: paid - share,
+        });
+      }
+    }
+
+    return {
+      user_id: m.id,
+      name: m.name,
+      total_paid: totalPaid,
+      total_share: totalShare,
+      net_balance: totalPaid - totalShare,
+      expenses: involvedExpenses,
+    };
+  });
+
+  // Get payments
+  const payments = db.prepare(`
+    SELECT p.id, p.payer_id, p.payee_id, p.amount, p.created_at,
+      payer.name as payer_name, payee.name as payee_name
+    FROM payments p
+    JOIN users payer ON payer.id = p.payer_id
+    JOIN users payee ON payee.id = p.payee_id
+    WHERE p.group_id = ?
+    ORDER BY p.created_at DESC
+  `).all(groupId);
+
+  return {
+    members: memberDetails,
+    expenses: detailedExpenses,
+    payments,
+  };
+}
+
+module.exports = { computeGroupBalances, computeDashboardBalances, computeDetailedBreakdown };

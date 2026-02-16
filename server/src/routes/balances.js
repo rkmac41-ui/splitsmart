@@ -16,6 +16,16 @@ router.get('/:groupId/balances', groupAccess, (req, res, next) => {
   }
 });
 
+// Get detailed balance breakdown for a group
+router.get('/:groupId/balances/details', groupAccess, (req, res, next) => {
+  try {
+    const details = balanceService.computeDetailedBreakdown(Number(req.params.groupId));
+    res.json(details);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Get dashboard balances
 router.get('/dashboard', (req, res, next) => {
   try {
