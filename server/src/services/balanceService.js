@@ -7,11 +7,24 @@ const { simplifyDebts } = require('../utils/debtSimplifier');
  */
 function computeGroupBalances(groupId) {
   const group = db.prepare('SELECT simplify_debts FROM groups WHERE id = ?').get(groupId);
-  const members = db.prepare(`
+
+  // Real members
+  const realMembers = db.prepare(`
     SELECT u.id, u.name FROM group_members gm
     JOIN users u ON u.id = gm.user_id
     WHERE gm.group_id = ?
   `).all(groupId);
+
+  // Unclaimed placeholder members (represented with negative IDs)
+  const placeholders = db.prepare(`
+    SELECT id, name FROM placeholder_members
+    WHERE group_id = ? AND claimed_by IS NULL
+  `).all(groupId);
+
+  const members = [
+    ...realMembers,
+    ...placeholders.map(p => ({ id: -p.id, name: p.name })),
+  ];
 
   // Build pairwise debt map: debts[fromUser][toUser] = amount
   // This represents "fromUser owes toUser"

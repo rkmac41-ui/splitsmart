@@ -42,7 +42,7 @@ export default function BalanceList({ balances, onSettleUp }) {
               <span className={`${styles.amount} ${isYouOwe ? styles.negative : ''} ${isOwedToYou ? styles.positive : ''}`}>
                 {formatCurrency(debt.amount)}
               </span>
-              {isYouOwe && onSettleUp && (
+              {isYouOwe && onSettleUp && debt.to_user > 0 && debt.from_user > 0 && (
                 <button
                   className={styles.settleBtn}
                   onClick={() => onSettleUp(debt)}

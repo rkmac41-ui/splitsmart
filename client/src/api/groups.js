@@ -32,3 +32,19 @@ export const getGroupByInviteToken = (token) =>
 
 export const joinGroupViaInvite = (token) =>
   client.post(`/groups/invite/${token}`).then(r => r.data);
+
+// Placeholder members
+export const addPlaceholderMember = (groupId, name) =>
+  client.post(`/groups/${groupId}/placeholders`, { name }).then(r => r.data);
+
+export const getPlaceholderMembers = (groupId) =>
+  client.get(`/groups/${groupId}/placeholders`).then(r => r.data);
+
+export const removePlaceholderMember = (groupId, placeholderId) =>
+  client.delete(`/groups/${groupId}/placeholders/${placeholderId}`).then(r => r.data);
+
+export const claimPlaceholder = (groupId, placeholderId) =>
+  client.post(`/groups/${groupId}/placeholders/${placeholderId}/claim`).then(r => r.data);
+
+export const getUnclaimedPlaceholders = (groupId) =>
+  client.get(`/groups/${groupId}/placeholders/unclaimed`).then(r => r.data);

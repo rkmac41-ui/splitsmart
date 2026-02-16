@@ -6,7 +6,7 @@ import SplitSelector from './SplitSelector';
 import PayerSelector from './PayerSelector';
 import styles from './ExpenseForm.module.css';
 
-export default function ExpenseForm({ members, trips, expense, onSubmit, onCancel, loading }) {
+export default function ExpenseForm({ members, trips, expense, onSubmit, onCancel, loading, defaultTripId }) {
   const { user } = useAuth();
 
   const [description, setDescription] = useState('');
@@ -14,7 +14,7 @@ export default function ExpenseForm({ members, trips, expense, onSubmit, onCance
   const [category, setCategory] = useState('other');
   const [splitType, setSplitType] = useState('equal');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [tripId, setTripId] = useState(null);
+  const [tripId, setTripId] = useState(defaultTripId || null);
   const [payers, setPayers] = useState([]);
   const [splits, setSplits] = useState([]);
 

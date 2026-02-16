@@ -362,6 +362,24 @@ export default function GroupPage() {
               showToast('Failed to remove member', 'error');
             }
           }}
+          onAddPlaceholder={async (name) => {
+            try {
+              await groupsApi.addPlaceholderMember(groupId, name);
+              showToast(`Added "${name}" as a pending member`, 'success');
+              fetchAll();
+            } catch (err) {
+              showToast(err.response?.data?.error || 'Failed to add member', 'error');
+            }
+          }}
+          onRemovePlaceholder={async (placeholderId) => {
+            try {
+              await groupsApi.removePlaceholderMember(groupId, placeholderId);
+              showToast('Placeholder member removed', 'success');
+              fetchAll();
+            } catch (err) {
+              showToast(err.response?.data?.error || 'Failed to remove placeholder', 'error');
+            }
+          }}
         />
       </Modal>
 
@@ -426,10 +444,12 @@ function SettleUpForm({ debt, onSubmit, onCancel }) {
   );
 }
 
-function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInvite, onLeave, onRemoveMember }) {
+function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInvite, onLeave, onRemoveMember, onAddPlaceholder, onRemovePlaceholder }) {
   const currentMember = members.find(m => m.id === userId);
   const isAdmin = currentMember?.role === 'admin';
   const [copied, setCopied] = useState(false);
+  const [placeholderName, setPlaceholderName] = useState('');
+  const [addingPlaceholder, setAddingPlaceholder] = useState(false);
 
   const handleCopy = async () => {
     try {
@@ -438,6 +458,21 @@ function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInv
       setTimeout(() => setCopied(false), 2000);
     } catch { /* ignore */ }
   };
+
+  const handleAddPlaceholder = async (e) => {
+    e.preventDefault();
+    if (!placeholderName.trim()) return;
+    setAddingPlaceholder(true);
+    try {
+      await onAddPlaceholder(placeholderName.trim());
+      setPlaceholderName('');
+    } finally {
+      setAddingPlaceholder(false);
+    }
+  };
+
+  const realMembers = members.filter(m => !m.is_placeholder);
+  const placeholderMembers = members.filter(m => m.is_placeholder);
 
   return (
     <div>
@@ -465,10 +500,36 @@ function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInv
         )}
       </div>
 
+      {/* Add Member by Name */}
       <div style={{ marginBottom: 24 }}>
-        <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 12 }}>Members ({members.length})</h3>
+        <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 8 }}>Add Member by Name</h3>
+        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 10 }}>
+          Add someone who hasn't signed up yet. They can claim their expenses when they join.
+        </p>
+        <form onSubmit={handleAddPlaceholder} style={{ display: 'flex', gap: 8 }}>
+          <input
+            type="text"
+            value={placeholderName}
+            onChange={e => setPlaceholderName(e.target.value)}
+            placeholder="Enter name..."
+            maxLength={100}
+            style={{
+              flex: 1, padding: '8px 12px', border: '1px solid var(--color-border)',
+              borderRadius: 8, fontSize: '0.8125rem'
+            }}
+          />
+          <button type="submit" disabled={!placeholderName.trim() || addingPlaceholder} style={{
+            padding: '8px 16px', background: 'var(--color-primary)', color: 'white',
+            border: 'none', borderRadius: 8, fontSize: '0.8125rem', fontWeight: 500,
+            cursor: 'pointer', opacity: (!placeholderName.trim() || addingPlaceholder) ? 0.6 : 1,
+          }}>{addingPlaceholder ? 'Adding...' : 'Add'}</button>
+        </form>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 12 }}>Members ({realMembers.length})</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {members.map(m => (
+          {realMembers.map(m => (
             <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0' }}>
               <div>
                 <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>
@@ -491,6 +552,35 @@ function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInv
           ))}
         </div>
       </div>
+
+      {/* Placeholder Members */}
+      {placeholderMembers.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 12 }}>
+            Pending Members ({placeholderMembers.length})
+          </h3>
+          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 8 }}>
+            These members haven't joined yet. They can claim their identity when they sign up.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {placeholderMembers.map(m => (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{m.name}</span>
+                  <span style={{
+                    fontSize: '0.6875rem', background: 'var(--color-warning-light, #fff3cd)',
+                    color: 'var(--color-warning-dark, #856404)', padding: '2px 8px', borderRadius: 99
+                  }}>Pending</span>
+                </div>
+                <button onClick={() => onRemovePlaceholder(m.placeholder_id)} style={{
+                  padding: '4px 12px', background: 'none', border: '1px solid var(--color-danger)',
+                  color: 'var(--color-danger)', borderRadius: 6, fontSize: '0.75rem', cursor: 'pointer'
+                }}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <button onClick={onLeave} style={{
         width: '100%', padding: '10px', background: 'none', border: '1px solid var(--color-danger)',

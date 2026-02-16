@@ -8,7 +8,7 @@
 
 .card {
   width: 100%;
-  max-width: 400px;
+  max-width: 440px;
   background: var(--color-surface);
   border-radius: var(--radius-xl);
   padding: var(--space-2xl);
@@ -66,6 +66,81 @@
 }
 
 .joinBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.joiningText {
+  margin-top: var(--space-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* Claim UI styles */
+.claimSubtitle {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-lg);
+  line-height: 1.5;
+}
+
+.claimList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+
+.claimOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--color-hover);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.claimOption:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light, #e8f4ff);
+}
+
+.claimOption:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.claimName {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+}
+
+.claimArrow {
+  color: var(--color-text-secondary);
+}
+
+.skipBtn {
+  padding: 10px 24px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.skipBtn:hover:not(:disabled) {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text);
+}
+
+.skipBtn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

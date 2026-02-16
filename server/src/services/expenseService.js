@@ -107,17 +107,24 @@ function getExpenseById(expenseId) {
 }
 
 function enrichExpense(expense) {
+  // LEFT JOIN to users for real members; placeholder IDs are negative
   const payers = db.prepare(`
-    SELECT ep.*, u.name as user_name
+    SELECT ep.*,
+      CASE WHEN ep.user_id > 0 THEN u.name
+           ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -ep.user_id)
+      END as user_name
     FROM expense_payers ep
-    JOIN users u ON u.id = ep.user_id
+    LEFT JOIN users u ON u.id = ep.user_id
     WHERE ep.expense_id = ?
   `).all(expense.id);
 
   const splits = db.prepare(`
-    SELECT es.*, u.name as user_name
+    SELECT es.*,
+      CASE WHEN es.user_id > 0 THEN u.name
+           ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -es.user_id)
+      END as user_name
     FROM expense_splits es
-    JOIN users u ON u.id = es.user_id
+    LEFT JOIN users u ON u.id = es.user_id
     WHERE es.expense_id = ?
   `).all(expense.id);
 

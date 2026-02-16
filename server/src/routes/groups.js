@@ -79,10 +79,10 @@ router.delete('/:groupId', groupAccess, (req, res, next) => {
   }
 });
 
-// Get group members
+// Get group members (includes unclaimed placeholders)
 router.get('/:groupId/members', groupAccess, (req, res, next) => {
   try {
-    const members = groupService.getGroupMembers(req.params.groupId);
+    const members = groupService.getAllGroupMembers(req.params.groupId);
     res.json({ members });
   } catch (err) {
     next(err);
@@ -114,6 +114,66 @@ router.get('/:groupId/invite-link', groupAccess, (req, res, next) => {
   try {
     const link = groupService.getActiveInviteLink(req.params.groupId);
     res.json({ invite: link });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Placeholder Members ─────────────────────────────────────
+
+// Add placeholder member by name
+router.post('/:groupId/placeholders', groupAccess, (req, res, next) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    const placeholder = groupService.addPlaceholderMember(req.params.groupId, name, req.user.id);
+    res.status(201).json({ placeholder });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Get placeholder members for a group
+router.get('/:groupId/placeholders', groupAccess, (req, res, next) => {
+  try {
+    const placeholders = groupService.getPlaceholderMembers(req.params.groupId);
+    res.json({ placeholders });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Remove a placeholder member
+router.delete('/:groupId/placeholders/:placeholderId', groupAccess, (req, res, next) => {
+  try {
+    groupService.removePlaceholderMember(req.params.groupId, Number(req.params.placeholderId));
+    res.json({ message: 'Placeholder removed' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Claim a placeholder (called by joining user)
+router.post('/:groupId/placeholders/:placeholderId/claim', groupAccess, (req, res, next) => {
+  try {
+    const result = groupService.claimPlaceholder(
+      req.params.groupId,
+      Number(req.params.placeholderId),
+      req.user.id
+    );
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Get unclaimed placeholders (for the claim flow)
+router.get('/:groupId/placeholders/unclaimed', groupAccess, (req, res, next) => {
+  try {
+    const placeholders = groupService.getUnclaimedPlaceholders(req.params.groupId);
+    res.json({ placeholders });
   } catch (err) {
     next(err);
   }

@@ -48,7 +48,7 @@ export default function PayerSelector({ members, payers, onChange, totalAmount, 
         >
           {members.map(m => (
             <option key={m.id} value={m.id}>
-              {m.id === currentUserId ? `${m.name} (you)` : m.name}
+              {m.id === currentUserId ? `${m.name} (you)` : m.is_placeholder ? `${m.name} (pending)` : m.name}
             </option>
           ))}
         </select>
@@ -74,7 +74,7 @@ export default function PayerSelector({ members, payers, onChange, totalAmount, 
                   checked={included}
                   onChange={() => togglePayerIncluded(m.id)}
                 />
-                <span>{m.id === currentUserId ? `${m.name} (you)` : m.name}</span>
+                <span>{m.id === currentUserId ? `${m.name} (you)` : m.is_placeholder ? `${m.name} (pending)` : m.name}</span>
               </label>
               {included && (
                 <div className={styles.amountWrap}>

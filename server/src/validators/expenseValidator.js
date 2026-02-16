@@ -16,13 +16,13 @@ const createExpenseSchema = Joi.object({
   trip_id: Joi.number().integer().positive().allow(null).default(null),
   payers: Joi.array().items(
     Joi.object({
-      user_id: Joi.number().integer().positive().required(),
+      user_id: Joi.number().integer().not(0).required(), // negative = placeholder member
       amount: Joi.number().integer().positive().required(),
     })
   ).min(1).required(),
   splits: Joi.array().items(
     Joi.object({
-      user_id: Joi.number().integer().positive().required(),
+      user_id: Joi.number().integer().not(0).required(), // negative = placeholder member
       share_value: Joi.number().allow(null),
     })
   ).min(1).required(),

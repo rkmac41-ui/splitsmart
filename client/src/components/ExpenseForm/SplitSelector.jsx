@@ -79,7 +79,7 @@ export default function SplitSelector({
         {members.map(m => {
           const split = splits.find(s => s.user_id === m.id);
           const included = split?.included !== false;
-          const memberName = m.id === user?.id ? `${m.name} (you)` : m.name;
+          const memberName = m.id === user?.id ? `${m.name} (you)` : m.is_placeholder ? `${m.name} (pending)` : m.name;
 
           return (
             <div key={m.id} className={styles.memberRow}>

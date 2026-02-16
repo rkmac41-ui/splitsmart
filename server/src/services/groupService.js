@@ -170,6 +170,11 @@ function joinGroupViaInvite(token, userId) {
 
   const user = db.prepare('SELECT name FROM users WHERE id = ?').get(userId);
 
+  // Check for unclaimed placeholders in this group
+  const unclaimed = db.prepare(
+    'SELECT * FROM placeholder_members WHERE group_id = ? AND claimed_by IS NULL ORDER BY name ASC'
+  ).all(invite.group_id);
+
   db.transaction(() => {
     db.prepare(
       'INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)'
@@ -189,7 +194,10 @@ function joinGroupViaInvite(token, userId) {
     );
   })();
 
-  return getGroupById(invite.group_id);
+  const group = getGroupById(invite.group_id);
+
+  // Return unclaimed placeholders so frontend can prompt claiming
+  return { ...group, unclaimed_placeholders: unclaimed };
 }
 
 function getGroupByInviteToken(token) {
@@ -202,6 +210,152 @@ function getGroupByInviteToken(token) {
   return getGroupById(invite.group_id);
 }
 
+// ─── Placeholder Members ─────────────────────────────────────
+
+function addPlaceholderMember(groupId, name, createdBy) {
+  const trimmedName = name.trim();
+  if (!trimmedName) throw new ConflictError('Name cannot be empty');
+
+  // Check if a real member already has this name
+  const existingReal = db.prepare(`
+    SELECT u.name FROM group_members gm
+    JOIN users u ON u.id = gm.user_id
+    WHERE gm.group_id = ? AND LOWER(u.name) = LOWER(?)
+  `).get(groupId, trimmedName);
+
+  if (existingReal) throw new ConflictError(`A member named "${trimmedName}" already exists`);
+
+  try {
+    db.prepare(
+      'INSERT INTO placeholder_members (group_id, name, created_by) VALUES (?, ?, ?)'
+    ).run(groupId, trimmedName, createdBy);
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint')) {
+      throw new ConflictError(`A placeholder named "${trimmedName}" already exists in this group`);
+    }
+    throw err;
+  }
+
+  const placeholder = db.prepare(
+    'SELECT * FROM placeholder_members WHERE group_id = ? AND name = ?'
+  ).get(groupId, trimmedName);
+
+  activityService.logActivity(groupId, createdBy, 'placeholder_added', 'placeholder', placeholder.id, {
+    name: trimmedName,
+  });
+
+  return placeholder;
+}
+
+function getPlaceholderMembers(groupId) {
+  return db.prepare(
+    'SELECT * FROM placeholder_members WHERE group_id = ? ORDER BY created_at ASC'
+  ).all(groupId);
+}
+
+function getUnclaimedPlaceholders(groupId) {
+  return db.prepare(
+    'SELECT * FROM placeholder_members WHERE group_id = ? AND claimed_by IS NULL ORDER BY name ASC'
+  ).all(groupId);
+}
+
+function removePlaceholderMember(groupId, placeholderId) {
+  const ph = db.prepare(
+    'SELECT * FROM placeholder_members WHERE id = ? AND group_id = ?'
+  ).get(placeholderId, groupId);
+
+  if (!ph) throw new NotFoundError('Placeholder member not found');
+  if (ph.claimed_by) throw new ConflictError('Cannot remove a claimed placeholder');
+
+  // Check if they have expenses
+  const negId = -placeholderId;
+  const hasExpenses = db.prepare(`
+    SELECT 1 FROM expense_payers WHERE user_id = ? AND expense_id IN
+      (SELECT id FROM expenses WHERE group_id = ? AND is_deleted = 0)
+    UNION
+    SELECT 1 FROM expense_splits WHERE user_id = ? AND expense_id IN
+      (SELECT id FROM expenses WHERE group_id = ? AND is_deleted = 0)
+  `).get(negId, groupId, negId, groupId);
+
+  if (hasExpenses) {
+    throw new ConflictError('Cannot remove placeholder with assigned expenses');
+  }
+
+  db.prepare('DELETE FROM placeholder_members WHERE id = ?').run(placeholderId);
+  return ph;
+}
+
+/**
+ * Claim a placeholder member: transfers all their expense records to the real user.
+ * Placeholder user_ids are stored as negative: -placeholder.id
+ */
+function claimPlaceholder(groupId, placeholderId, userId) {
+  const ph = db.prepare(
+    'SELECT * FROM placeholder_members WHERE id = ? AND group_id = ? AND claimed_by IS NULL'
+  ).get(placeholderId, groupId);
+
+  if (!ph) throw new NotFoundError('Placeholder not found or already claimed');
+
+  const user = db.prepare('SELECT name FROM users WHERE id = ?').get(userId);
+  const negId = -placeholderId;
+
+  db.transaction(() => {
+    // Mark placeholder as claimed
+    db.prepare(
+      "UPDATE placeholder_members SET claimed_by = ?, claimed_at = datetime('now') WHERE id = ?"
+    ).run(userId, placeholderId);
+
+    // Transfer expense_payers records from placeholder (-id) to real user
+    db.prepare('UPDATE expense_payers SET user_id = ? WHERE user_id = ?').run(userId, negId);
+
+    // Transfer expense_splits records from placeholder (-id) to real user
+    db.prepare('UPDATE expense_splits SET user_id = ? WHERE user_id = ?').run(userId, negId);
+
+    // Transfer any payment records
+    db.prepare('UPDATE payments SET payer_id = ? WHERE payer_id = ?').run(userId, negId);
+    db.prepare('UPDATE payments SET payee_id = ? WHERE payee_id = ?').run(userId, negId);
+
+    // Log activity
+    activityService.logActivity(groupId, userId, 'placeholder_claimed', 'placeholder', placeholderId, {
+      placeholder_name: ph.name,
+      user_name: user.name,
+    });
+  })();
+
+  return { placeholder: ph, user_id: userId };
+}
+
+/**
+ * Returns combined list of real members + unclaimed placeholder members for a group.
+ * Placeholder members get negative IDs to distinguish them.
+ */
+function getAllGroupMembers(groupId) {
+  const realMembers = db.prepare(`
+    SELECT u.id, u.name, u.email, gm.role, gm.joined_at, 0 as is_placeholder
+    FROM group_members gm
+    JOIN users u ON u.id = gm.user_id
+    WHERE gm.group_id = ?
+  `).all(groupId);
+
+  const placeholders = db.prepare(`
+    SELECT id, name, created_at as joined_at
+    FROM placeholder_members
+    WHERE group_id = ? AND claimed_by IS NULL
+  `).all(groupId);
+
+  const placeholderMembers = placeholders.map(p => ({
+    id: -p.id,
+    name: p.name,
+    email: null,
+    role: 'placeholder',
+    joined_at: p.joined_at,
+    is_placeholder: 1,
+    placeholder_id: p.id,
+  }));
+
+  return [...realMembers, ...placeholderMembers];
+}
+
 module.exports = {
   createGroup,
   getUserGroups,
@@ -209,9 +363,15 @@ module.exports = {
   updateGroup,
   deleteGroup,
   getGroupMembers,
+  getAllGroupMembers,
   removeMember,
   generateInviteLink,
   getActiveInviteLink,
   joinGroupViaInvite,
   getGroupByInviteToken,
+  addPlaceholderMember,
+  getPlaceholderMembers,
+  getUnclaimedPlaceholders,
+  removePlaceholderMember,
+  claimPlaceholder,
 };

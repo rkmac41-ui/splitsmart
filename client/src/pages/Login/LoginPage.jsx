@@ -72,7 +72,7 @@ export default function LoginPage() {
         </form>
 
         <p className={styles.footer}>
-          Don't have an account? <Link to="/signup">Sign up</Link>
+          Don't have an account? <Link to="/signup" state={{ from: location.state?.from }}>Sign up</Link>
         </p>
       </div>
     </div>

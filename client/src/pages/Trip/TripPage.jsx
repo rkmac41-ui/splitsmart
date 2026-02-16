@@ -133,6 +133,7 @@ export default function TripPage() {
         <ExpenseForm
           members={members}
           trips={trips}
+          defaultTripId={Number(tripId)}
           onSubmit={handleAddExpense}
           onCancel={() => setShowAddExpense(false)}
           loading={expenseLoading}
