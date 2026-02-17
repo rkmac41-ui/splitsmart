@@ -297,6 +297,33 @@ function computeDetailedBreakdown(groupId) {
     };
   });
 
+  // Compute per-pair expense breakdown (which expenses contribute to each A→B debt)
+  const pairExpenses = {};
+  for (const exp of detailedExpenses) {
+    const totalPaid = exp.payers.reduce((s, p) => s + p.amount, 0);
+    if (totalPaid === 0) continue;
+
+    for (const split of exp.splits) {
+      for (const payer of exp.payers) {
+        if (split.user_id === payer.user_id) continue;
+        // split.user_id owes payer.user_id for this expense
+        const owedAmount = Math.round((split.amount * payer.amount) / totalPaid);
+        if (owedAmount <= 0) continue;
+
+        const pairKey = `${split.user_id}:${payer.user_id}`;
+        if (!pairExpenses[pairKey]) pairExpenses[pairKey] = [];
+        pairExpenses[pairKey].push({
+          id: exp.id,
+          description: exp.description,
+          total_amount: exp.amount,
+          date: exp.date,
+          category: exp.category,
+          amount_owed: owedAmount,
+        });
+      }
+    }
+  }
+
   // Get payments
   const payments = db.prepare(`
     SELECT p.id, p.payer_id, p.payee_id, p.amount, p.created_at,
@@ -312,6 +339,7 @@ function computeDetailedBreakdown(groupId) {
     members: memberDetails,
     expenses: detailedExpenses,
     payments,
+    pairExpenses,
   };
 }
 

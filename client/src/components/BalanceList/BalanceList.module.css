@@ -21,15 +21,29 @@
   gap: var(--space-sm);
 }
 
-.item {
+/* Debt card (expandable) */
+.debtCard {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.debtHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   padding: var(--space-md);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
+  background: none;
+  border: none;
+  text-align: left;
+  transition: background var(--transition-fast);
   gap: var(--space-md);
+}
+
+.debtHeader:hover {
+  background: var(--color-hover);
 }
 
 .people {
@@ -91,6 +105,16 @@
   background: var(--color-primary-dark);
 }
 
+.chevron {
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
 .settled {
   text-align: center;
   padding: var(--space-2xl);
@@ -109,97 +133,8 @@
   margin: 0 auto var(--space-md);
 }
 
-/* Member breakdown */
-.memberBreakdownList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-.memberCard {
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  background: var(--color-surface);
-}
-
-.memberHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: var(--space-md);
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  transition: background var(--transition-fast);
-  gap: var(--space-md);
-}
-
-.memberHeader:hover {
-  background: var(--color-hover);
-}
-
-.memberLeft {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  flex: 1;
-  min-width: 0;
-}
-
-.memberInfo {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.memberName {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-semibold);
-  color: var(--color-text);
-}
-
-.memberSummary {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-  margin-top: 1px;
-}
-
-.memberRight {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  flex-shrink: 0;
-}
-
-.memberNet {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-semibold);
-  color: var(--color-text);
-}
-
-.memberNet.positive {
-  color: var(--color-success);
-}
-
-.memberNet.negative {
-  color: var(--color-danger);
-}
-
-.chevron {
-  color: var(--color-text-tertiary);
-  transition: transform var(--transition-fast);
-  flex-shrink: 0;
-}
-
-.chevronOpen {
-  transform: rotate(180deg);
-}
-
-/* Expense breakdown rows */
-.memberExpenses {
+/* Expense breakdown rows under each debt */
+.debtExpenses {
   border-top: 1px solid var(--color-border-light);
   background: var(--color-bg);
 }
@@ -254,16 +189,6 @@
   flex-shrink: 0;
 }
 
-.breakdownPaid {
-  font-size: 11px;
-  color: var(--color-success);
-}
-
-.breakdownShare {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-}
-
 .breakdownNet {
   font-size: var(--font-size-xs);
   font-weight: var(--font-semibold);
@@ -279,7 +204,7 @@
 }
 
 @media (max-width: 639px) {
-  .item {
+  .debtHeader {
     flex-direction: column;
     align-items: flex-start;
   }

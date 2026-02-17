@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import * as groupsApi from '../../api/groups';
@@ -29,7 +29,7 @@ export default function GroupPage() {
   const [detailedBalances, setDetailedBalances] = useState(null);
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('expenses');
+  const [activeTab, setActiveTab] = useState('trips');
 
   // Modals
   const [showAddExpense, setShowAddExpense] = useState(false);
@@ -202,7 +202,7 @@ export default function GroupPage() {
 
       {/* Tabs */}
       <div className={styles.tabs}>
-        {['expenses', 'balances', 'trips', 'activity'].map(tab => (
+        {['trips', 'expenses', 'balances', 'activity'].map(tab => (
           <button
             key={tab}
             className={`${styles.tab} ${activeTab === tab ? styles.activeTab : ''}`}
@@ -217,21 +217,30 @@ export default function GroupPage() {
       <div className={styles.content}>
         {activeTab === 'expenses' && (
           <div className={styles.expenseList}>
-            {expenses.length === 0 ? (
-              <div className={styles.empty}>
-                <p>No expenses yet</p>
-                <button className={styles.addFirstBtn} onClick={() => setShowAddExpense(true)}>
-                  Add your first expense
-                </button>
-              </div>
-            ) : (
-              <ExpensesByTrip
-                expenses={expenses}
-                trips={trips}
-                onEdit={setEditingExpense}
-                onDelete={handleDeleteExpense}
-              />
-            )}
+            {(() => {
+              const myExpenses = expenses.filter(e =>
+                e.payers?.some(p => p.user_id === user?.id) ||
+                e.splits?.some(s => s.user_id === user?.id)
+              );
+              if (myExpenses.length === 0) {
+                return (
+                  <div className={styles.empty}>
+                    <p>No expenses involving you yet</p>
+                    <button className={styles.addFirstBtn} onClick={() => setShowAddExpense(true)}>
+                      Add your first expense
+                    </button>
+                  </div>
+                );
+              }
+              return (
+                <ExpensesByTrip
+                  expenses={myExpenses}
+                  trips={trips}
+                  onEdit={setEditingExpense}
+                  onDelete={handleDeleteExpense}
+                />
+              );
+            })()}
           </div>
         )}
 
@@ -256,7 +265,7 @@ export default function GroupPage() {
               balances={balances?.balances}
               memberBalances={balances?.memberBalances}
               onSettleUp={(debt) => setShowSettleUp(debt)}
-              detailedMembers={detailedBalances?.members}
+              pairExpenses={detailedBalances?.pairExpenses}
             />
           </div>
         )}
@@ -270,15 +279,20 @@ export default function GroupPage() {
               <div className={styles.empty}><p>No trips yet</p></div>
             ) : (
               <div className={styles.tripList}>
-                {trips.map(trip => (
-                  <Link key={trip.id} to={`/groups/${groupId}/trips/${trip.id}`} className={styles.tripItem}>
-                    <div className={styles.tripInfo}>
-                      <span className={styles.tripName}>{trip.name}</span>
-                      <span className={styles.tripMeta}>{trip.expense_count} expenses &middot; {formatCurrency(trip.total_amount)}</span>
-                    </div>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-                  </Link>
-                ))}
+                {trips.map(trip => {
+                  const tripExpenses = expenses.filter(e => e.trip_id === trip.id);
+                  return (
+                    <TripAccordion
+                      key={trip.id}
+                      trip={trip}
+                      tripExpenses={tripExpenses}
+                      onEdit={setEditingExpense}
+                      onDelete={handleDeleteExpense}
+                      groupId={groupId}
+                      onAddExpense={() => setShowAddExpense(true)}
+                    />
+                  );
+                })}
               </div>
             )}
           </div>
@@ -567,6 +581,50 @@ function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInv
         width: '100%', padding: '10px', background: 'none', border: '1px solid var(--color-danger)',
         color: 'var(--color-danger)', borderRadius: 8, fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer'
       }}>Leave Group</button>
+    </div>
+  );
+}
+
+function TripAccordion({ trip, tripExpenses, onEdit, onDelete, groupId, onAddExpense }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className={styles.tripAccordion}>
+      <button
+        className={styles.tripAccordionHeader}
+        onClick={() => setExpanded(!expanded)}
+        type="button"
+      >
+        <div className={styles.tripInfo}>
+          <span className={styles.tripName}>{trip.name}</span>
+          <span className={styles.tripMeta}>
+            {tripExpenses.length} expense{tripExpenses.length !== 1 ? 's' : ''} &middot; {formatCurrency(trip.total_amount)}
+          </span>
+        </div>
+        <svg
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2"
+          className={`${styles.tripChevron} ${expanded ? styles.tripChevronOpen : ''}`}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className={styles.tripAccordionBody}>
+          {tripExpenses.length === 0 ? (
+            <div className={styles.tripEmptyExpenses}>
+              <p>No expenses in this trip</p>
+              <button className={styles.addFirstBtn} onClick={onAddExpense}>
+                Add expense
+              </button>
+            </div>
+          ) : (
+            tripExpenses.map(expense => (
+              <ExpenseRow key={expense.id} expense={expense} onEdit={onEdit} onDelete={onDelete} />
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
