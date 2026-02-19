@@ -28,7 +28,8 @@ function createGroup(name, userId) {
 function getUserGroups(userId) {
   return db.prepare(`
     SELECT g.*, gm.role,
-      (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count
+      (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count,
+      (SELECT COUNT(*) FROM trips WHERE group_id = g.id) as trip_count
     FROM groups g
     JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = ?
     ORDER BY g.updated_at DESC

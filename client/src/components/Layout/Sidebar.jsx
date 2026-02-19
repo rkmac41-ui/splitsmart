@@ -90,7 +90,7 @@ export default function Sidebar({ isOpen, onClose }) {
                       {g.name.charAt(0).toUpperCase()}
                     </span>
                     <span className={styles.groupName}>{g.name}</span>
-                    <span className={styles.memberCount}>{g.member_count}</span>
+                    <span className={styles.memberCount}>{g.trip_count || 0}</span>
                   </NavLink>
                 ))
               )}
