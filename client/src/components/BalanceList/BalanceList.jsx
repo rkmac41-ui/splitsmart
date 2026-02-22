@@ -102,7 +102,7 @@ function DebtRow({ debt, userId, onSettleUp, pairExpenses }) {
 
       {expanded && hasExpenses && (
         <div className={styles.debtExpenses}>
-          {relatedExpenses.map((exp, idx) => {
+          {relatedExpenses.map((exp) => {
             const cat = getCategoryByKey(exp.category);
             const isOffset = exp.direction === 'offset';
             return (
@@ -122,6 +122,10 @@ function DebtRow({ debt, userId, onSettleUp, pairExpenses }) {
               </div>
             );
           })}
+          <div className={styles.breakdownTotal}>
+            <span>Net total</span>
+            <span className={styles.negative}>{formatCurrency(debt.amount)}</span>
+          </div>
         </div>
       )}
     </div>

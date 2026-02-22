@@ -203,6 +203,17 @@
   color: var(--color-danger);
 }
 
+.breakdownTotal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  border-top: 2px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+}
+
 @media (max-width: 639px) {
   .debtHeader {
     flex-direction: column;

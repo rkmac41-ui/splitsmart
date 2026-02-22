@@ -33,12 +33,18 @@ function computeGroupBalances(groupId) {
     debts[m.id] = {};
   }
 
-  // Process all non-deleted expenses
-  const expenses = db.prepare(
-    'SELECT id, amount FROM expenses WHERE group_id = ? AND is_deleted = 0'
-  ).all(groupId);
+  // Also track per-pair per-expense breakdown
+  // pairExpenseDebts[fromUser:toUser] = [ { expense info, amount_owed } ]
+  const pairExpenseDebts = {};
 
-  for (const expense of expenses) {
+  // Process all non-deleted expenses
+  const allExpenses = db.prepare(`
+    SELECT e.id, e.amount, e.description, e.date, e.category
+    FROM expenses e
+    WHERE e.group_id = ? AND e.is_deleted = 0
+  `).all(groupId);
+
+  for (const expense of allExpenses) {
     const payers = db.prepare(
       'SELECT user_id, amount FROM expense_payers WHERE expense_id = ?'
     ).all(expense.id);
@@ -58,9 +64,22 @@ function computeGroupBalances(groupId) {
 
         // This split user owes the payer: split.amount * (payer.amount / totalPaid)
         const owedAmount = Math.round((split.amount * payer.amount) / totalPaid);
+        if (owedAmount <= 0) continue;
 
         if (!debts[split.user_id]) debts[split.user_id] = {};
         debts[split.user_id][payer.user_id] = (debts[split.user_id][payer.user_id] || 0) + owedAmount;
+
+        // Track per-expense contribution
+        const pairKey = `${split.user_id}:${payer.user_id}`;
+        if (!pairExpenseDebts[pairKey]) pairExpenseDebts[pairKey] = [];
+        pairExpenseDebts[pairKey].push({
+          id: expense.id,
+          description: expense.description,
+          total_amount: expense.amount,
+          date: expense.date,
+          category: expense.category,
+          amount_owed: owedAmount,
+        });
       }
     }
   }
@@ -136,6 +155,7 @@ function computeGroupBalances(groupId) {
       balance,
     })),
     simplify_debts: Boolean(group.simplify_debts),
+    pairExpenses: pairExpenseDebts,
   };
 }
 

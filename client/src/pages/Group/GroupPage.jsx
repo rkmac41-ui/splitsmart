@@ -265,7 +265,7 @@ export default function GroupPage() {
               balances={balances?.balances}
               memberBalances={balances?.memberBalances}
               onSettleUp={(debt) => setShowSettleUp(debt)}
-              pairExpenses={detailedBalances?.pairExpenses}
+              pairExpenses={balances?.pairExpenses}
             />
           </div>
         )}
