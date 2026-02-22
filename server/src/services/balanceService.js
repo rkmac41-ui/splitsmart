@@ -69,17 +69,20 @@ function computeGroupBalances(groupId) {
         if (!debts[split.user_id]) debts[split.user_id] = {};
         debts[split.user_id][payer.user_id] = (debts[split.user_id][payer.user_id] || 0) + owedAmount;
 
-        // Track per-expense contribution
+        // Track per-expense contribution (aggregate by expense ID per pair)
         const pairKey = `${split.user_id}:${payer.user_id}`;
-        if (!pairExpenseDebts[pairKey]) pairExpenseDebts[pairKey] = [];
-        pairExpenseDebts[pairKey].push({
-          id: expense.id,
-          description: expense.description,
-          total_amount: expense.amount,
-          date: expense.date,
-          category: expense.category,
-          amount_owed: owedAmount,
-        });
+        if (!pairExpenseDebts[pairKey]) pairExpenseDebts[pairKey] = {};
+        if (!pairExpenseDebts[pairKey][expense.id]) {
+          pairExpenseDebts[pairKey][expense.id] = {
+            id: expense.id,
+            description: expense.description,
+            total_amount: expense.amount,
+            date: expense.date,
+            category: expense.category,
+            amount_owed: 0,
+          };
+        }
+        pairExpenseDebts[pairKey][expense.id].amount_owed += owedAmount;
       }
     }
   }
@@ -155,7 +158,10 @@ function computeGroupBalances(groupId) {
       balance,
     })),
     simplify_debts: Boolean(group.simplify_debts),
-    pairExpenses: pairExpenseDebts,
+    // Convert per-expense objects to arrays
+    pairExpenses: Object.fromEntries(
+      Object.entries(pairExpenseDebts).map(([key, expMap]) => [key, Object.values(expMap)])
+    ),
   };
 }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import * as groupsApi from '../../api/groups';
@@ -20,6 +20,7 @@ export default function GroupPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [group, setGroup] = useState(null);
   const [members, setMembers] = useState([]);
@@ -29,7 +30,23 @@ export default function GroupPage() {
   const [detailedBalances, setDetailedBalances] = useState(null);
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('trips');
+
+  const validTabs = ['trips', 'expenses', 'balances', 'activity'];
+  const tabFromUrl = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(
+    validTabs.includes(tabFromUrl) ? tabFromUrl : 'trips'
+  );
+
+  // Sync tab from URL param (e.g. when clicking a notification)
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && validTabs.includes(tab) && tab !== activeTab) {
+      setActiveTab(tab);
+      // Clean up the URL param
+      searchParams.delete('tab');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams]);
 
   // Modals
   const [showAddExpense, setShowAddExpense] = useState(false);

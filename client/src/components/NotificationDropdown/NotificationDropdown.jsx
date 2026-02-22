@@ -18,7 +18,9 @@ export default function NotificationDropdown({ onClose }) {
       await markAsRead(notification.id);
     }
     if (notification.group_id) {
-      navigate(`/groups/${notification.group_id}`);
+      // Navigate to the group and switch to the relevant tab
+      const tab = notification.entity_type === 'expense' ? 'expenses' : 'activity';
+      navigate(`/groups/${notification.group_id}?tab=${tab}`);
     }
     onClose();
   };
