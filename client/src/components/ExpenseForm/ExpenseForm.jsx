@@ -25,14 +25,22 @@ export default function ExpenseForm({ members, trips, expense, onSubmit, onCance
       setAmount(centsToDollars(expense.amount));
       setCategory(expense.category);
       setSplitType(expense.split_type);
-      setDate(expense.date);
+      setDate(expense.date?.split('T')[0] || expense.date);
       setTripId(expense.trip_id);
       setPayers(expense.payers.map(p => ({ user_id: p.user_id, amount: centsToDollars(p.amount) })));
-      setSplits(expense.splits.map(s => ({
-        user_id: s.user_id,
-        share_value: s.share_value,
-        included: true,
-      })));
+
+      // Build splits for ALL members, marking those in the expense as included
+      const expenseSplitMap = {};
+      for (const s of expense.splits) {
+        expenseSplitMap[s.user_id] = s;
+      }
+      setSplits(members.map(m => {
+        const s = expenseSplitMap[m.id];
+        if (s) {
+          return { user_id: m.id, share_value: s.share_value, included: true };
+        }
+        return { user_id: m.id, share_value: null, included: false };
+      }));
     } else {
       // Defaults for new expense — no members pre-selected for split
       setPayers([{ user_id: user.id, amount: '' }]);

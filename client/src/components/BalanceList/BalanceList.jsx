@@ -43,9 +43,14 @@ function DebtRow({ debt, userId, onSettleUp, pairExpenses }) {
   const isYouOwe = debt.from_user === userId;
   const isOwedToYou = debt.to_user === userId;
 
-  // Get expenses for this debt pair: from_user owes to_user
-  const pairKey = `${debt.from_user}:${debt.to_user}`;
-  const relatedExpenses = pairExpenses?.[pairKey] || [];
+  // Get expenses for this debt pair in both directions and net them
+  // Forward: from_user owes to_user (positive contribution to debt)
+  const fwdKey = `${debt.from_user}:${debt.to_user}`;
+  const fwdExpenses = (pairExpenses?.[fwdKey] || []).map(e => ({ ...e, direction: 'owed' }));
+  // Reverse: to_user owes from_user (reduces the debt)
+  const revKey = `${debt.to_user}:${debt.from_user}`;
+  const revExpenses = (pairExpenses?.[revKey] || []).map(e => ({ ...e, direction: 'offset' }));
+  const relatedExpenses = [...fwdExpenses, ...revExpenses].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   const hasExpenses = relatedExpenses.length > 0;
 
   return (
@@ -97,10 +102,11 @@ function DebtRow({ debt, userId, onSettleUp, pairExpenses }) {
 
       {expanded && hasExpenses && (
         <div className={styles.debtExpenses}>
-          {relatedExpenses.map(exp => {
+          {relatedExpenses.map((exp, idx) => {
             const cat = getCategoryByKey(exp.category);
+            const isOffset = exp.direction === 'offset';
             return (
-              <div key={exp.id} className={styles.breakdownRow}>
+              <div key={`${exp.id}-${exp.direction}`} className={styles.breakdownRow}>
                 <span className={styles.breakdownCat}>{cat.emoji}</span>
                 <div className={styles.breakdownInfo}>
                   <span className={styles.breakdownDesc}>{exp.description}</span>
@@ -109,8 +115,8 @@ function DebtRow({ debt, userId, onSettleUp, pairExpenses }) {
                   </span>
                 </div>
                 <div className={styles.breakdownAmounts}>
-                  <span className={`${styles.breakdownNet} ${styles.negative}`}>
-                    {formatCurrency(exp.amount_owed)}
+                  <span className={`${styles.breakdownNet} ${isOffset ? styles.positive : styles.negative}`}>
+                    {isOffset ? '-' : '+'}{formatCurrency(exp.amount_owed)}
                   </span>
                 </div>
               </div>

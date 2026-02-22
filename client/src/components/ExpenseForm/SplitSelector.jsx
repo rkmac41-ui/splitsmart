@@ -10,7 +10,7 @@ export default function SplitSelector({
 
   const handleToggleMember = (userId) => {
     const updated = splits.map(s =>
-      s.user_id === userId ? { ...s, included: !s.included } : s
+      s.user_id === userId ? { ...s, included: !s.included, share_value: !s.included ? s.share_value : null } : s
     );
     onChange(updated);
   };
@@ -104,18 +104,14 @@ export default function SplitSelector({
 
           return (
             <div key={m.id} className={styles.memberRow}>
-              {splitType === 'equal' ? (
-                <label className={styles.checkLabel}>
-                  <input
-                    type="checkbox"
-                    checked={included}
-                    onChange={() => handleToggleMember(m.id)}
-                  />
-                  <span>{memberName}</span>
-                </label>
-              ) : (
-                <span className={styles.memberName}>{memberName}</span>
-              )}
+              <label className={styles.checkLabel}>
+                <input
+                  type="checkbox"
+                  checked={included}
+                  onChange={() => handleToggleMember(m.id)}
+                />
+                <span>{memberName}</span>
+              </label>
 
               {splitType === 'equal' && included && totalAmount > 0 && (
                 <span className={styles.splitAmount}>
@@ -123,7 +119,7 @@ export default function SplitSelector({
                 </span>
               )}
 
-              {splitType === 'exact' && (
+              {splitType === 'exact' && included && (
                 <div className={styles.inputWrap}>
                   <span className={styles.prefix}>$</span>
                   <input
@@ -138,7 +134,7 @@ export default function SplitSelector({
                 </div>
               )}
 
-              {splitType === 'percentage' && (
+              {splitType === 'percentage' && included && (
                 <div className={styles.inputWrap}>
                   <input
                     type="number"
@@ -154,15 +150,15 @@ export default function SplitSelector({
                 </div>
               )}
 
-              {splitType === 'shares' && (
+              {splitType === 'shares' && included && (
                 <div className={styles.inputWrap}>
                   <input
                     type="number"
                     step="1"
                     min="0"
-                    placeholder="1"
+                    placeholder="0"
                     className={styles.valueInput}
-                    value={split?.share_value || ''}
+                    value={split?.share_value ?? ''}
                     onChange={e => handleShareValueChange(m.id, e.target.value)}
                   />
                   <span className={styles.suffix}>shares</span>
