@@ -217,30 +217,21 @@ export default function GroupPage() {
       <div className={styles.content}>
         {activeTab === 'expenses' && (
           <div className={styles.expenseList}>
-            {(() => {
-              const myExpenses = expenses.filter(e =>
-                e.payers?.some(p => p.user_id === user?.id) ||
-                e.splits?.some(s => s.user_id === user?.id)
-              );
-              if (myExpenses.length === 0) {
-                return (
-                  <div className={styles.empty}>
-                    <p>No expenses involving you yet</p>
-                    <button className={styles.addFirstBtn} onClick={() => setShowAddExpense(true)}>
-                      Add your first expense
-                    </button>
-                  </div>
-                );
-              }
-              return (
-                <ExpensesByTrip
-                  expenses={myExpenses}
-                  trips={trips}
-                  onEdit={setEditingExpense}
-                  onDelete={handleDeleteExpense}
-                />
-              );
-            })()}
+            {expenses.length === 0 ? (
+              <div className={styles.empty}>
+                <p>No expenses yet</p>
+                <button className={styles.addFirstBtn} onClick={() => setShowAddExpense(true)}>
+                  Add your first expense
+                </button>
+              </div>
+            ) : (
+              <ExpensesByTrip
+                expenses={expenses}
+                trips={trips}
+                onEdit={setEditingExpense}
+                onDelete={handleDeleteExpense}
+              />
+            )}
           </div>
         )}
 
