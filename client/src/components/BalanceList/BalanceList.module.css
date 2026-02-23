@@ -203,6 +203,27 @@
   color: var(--color-danger);
 }
 
+.simplifiedNote {
+  padding: var(--space-xs) var(--space-md);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.breakdownSection {
+  padding: 0;
+}
+
+.breakdownSectionTitle {
+  padding: var(--space-xs) var(--space-md);
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
 .breakdownTotal {
   display: flex;
   align-items: center;

@@ -5,7 +5,7 @@ import { formatCurrency, formatDate } from '../../utils/formatters';
 import { getCategoryByKey } from '../../utils/constants';
 import styles from './BalanceList.module.css';
 
-export default function BalanceList({ balances, memberBalances, onSettleUp, pairExpenses }) {
+export default function BalanceList({ balances, memberBalances, onSettleUp, pairExpenses, memberExpenses, isSimplified }) {
   const { user } = useAuth();
 
   if (!balances || balances.length === 0) {
@@ -29,6 +29,8 @@ export default function BalanceList({ balances, memberBalances, onSettleUp, pair
               userId={user?.id}
               onSettleUp={onSettleUp}
               pairExpenses={pairExpenses}
+              memberExpenses={memberExpenses}
+              isSimplified={isSimplified}
             />
           ))}
         </div>
@@ -37,20 +39,55 @@ export default function BalanceList({ balances, memberBalances, onSettleUp, pair
   );
 }
 
-function DebtRow({ debt, userId, onSettleUp, pairExpenses }) {
+function DebtRow({ debt, userId, onSettleUp, pairExpenses, memberExpenses, isSimplified }) {
   const [expanded, setExpanded] = useState(false);
 
   const isYouOwe = debt.from_user === userId;
   const isOwedToYou = debt.to_user === userId;
 
-  // Get expenses for this debt pair in both directions and net them
-  // Forward: from_user owes to_user (positive contribution to debt)
-  const fwdKey = `${debt.from_user}:${debt.to_user}`;
-  const fwdExpenses = (pairExpenses?.[fwdKey] || []).map(e => ({ ...e, direction: 'owed' }));
-  // Reverse: to_user owes from_user (reduces the debt)
-  const revKey = `${debt.to_user}:${debt.from_user}`;
-  const revExpenses = (pairExpenses?.[revKey] || []).map(e => ({ ...e, direction: 'offset' }));
-  const relatedExpenses = [...fwdExpenses, ...revExpenses].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  // Build the expense breakdown depending on mode
+  let relatedExpenses = [];
+
+  if (isSimplified) {
+    // Simplified debts: pairs are synthetic, so show per-member expense breakdown
+    // The debtor (from_user) owes money overall — show their expenses where they owe (net < 0)
+    const debtorExpenses = (memberExpenses?.[debt.from_user] || [])
+      .filter(e => e.net < 0)
+      .map(e => ({
+        id: e.id,
+        description: e.description,
+        total_amount: e.total_amount,
+        date: e.date,
+        category: e.category,
+        amount_owed: Math.abs(e.net),
+        direction: 'owed',
+        detail: `Paid ${formatCurrency(e.paid)}, share ${formatCurrency(e.share)}`,
+      }));
+    // The creditor (to_user) is owed money — show their expenses where they overpaid (net > 0)
+    const creditorExpenses = (memberExpenses?.[debt.to_user] || [])
+      .filter(e => e.net > 0)
+      .map(e => ({
+        id: e.id,
+        description: e.description,
+        total_amount: e.total_amount,
+        date: e.date,
+        category: e.category,
+        amount_owed: e.net,
+        direction: 'offset',
+        detail: `Paid ${formatCurrency(e.paid)}, share ${formatCurrency(e.share)}`,
+      }));
+    relatedExpenses = [...debtorExpenses, ...creditorExpenses]
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  } else {
+    // Non-simplified: direct pair lookup (both directions)
+    const fwdKey = `${debt.from_user}:${debt.to_user}`;
+    const fwdExpenses = (pairExpenses?.[fwdKey] || []).map(e => ({ ...e, direction: 'owed' }));
+    const revKey = `${debt.to_user}:${debt.from_user}`;
+    const revExpenses = (pairExpenses?.[revKey] || []).map(e => ({ ...e, direction: 'offset' }));
+    relatedExpenses = [...fwdExpenses, ...revExpenses]
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }
+
   const hasExpenses = relatedExpenses.length > 0;
 
   return (
@@ -102,26 +139,84 @@ function DebtRow({ debt, userId, onSettleUp, pairExpenses }) {
 
       {expanded && hasExpenses && (
         <div className={styles.debtExpenses}>
-          {relatedExpenses.map((exp) => {
-            const cat = getCategoryByKey(exp.category);
-            const isOffset = exp.direction === 'offset';
-            return (
-              <div key={`${exp.id}-${exp.direction}`} className={styles.breakdownRow}>
-                <span className={styles.breakdownCat}>{cat.emoji}</span>
-                <div className={styles.breakdownInfo}>
-                  <span className={styles.breakdownDesc}>{exp.description}</span>
-                  <span className={styles.breakdownMeta}>
-                    {formatDate(exp.date)} &middot; Total: {formatCurrency(exp.total_amount)}
-                  </span>
+          {isSimplified && (
+            <div className={styles.simplifiedNote}>
+              Showing each person's net position per expense
+            </div>
+          )}
+          {isSimplified ? (
+            <>
+              {relatedExpenses.filter(e => e.direction === 'owed').length > 0 && (
+                <div className={styles.breakdownSection}>
+                  <div className={styles.breakdownSectionTitle}>{debt.from_user_name} owes from:</div>
+                  {relatedExpenses.filter(e => e.direction === 'owed').map((exp) => {
+                    const cat = getCategoryByKey(exp.category);
+                    return (
+                      <div key={`owed-${exp.id}`} className={styles.breakdownRow}>
+                        <span className={styles.breakdownCat}>{cat.emoji}</span>
+                        <div className={styles.breakdownInfo}>
+                          <span className={styles.breakdownDesc}>{exp.description}</span>
+                          <span className={styles.breakdownMeta}>
+                            {formatDate(exp.date)} &middot; {exp.detail}
+                          </span>
+                        </div>
+                        <div className={styles.breakdownAmounts}>
+                          <span className={`${styles.breakdownNet} ${styles.negative}`}>
+                            -{formatCurrency(exp.amount_owed)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className={styles.breakdownAmounts}>
-                  <span className={`${styles.breakdownNet} ${isOffset ? styles.positive : styles.negative}`}>
-                    {isOffset ? '-' : '+'}{formatCurrency(exp.amount_owed)}
-                  </span>
+              )}
+              {relatedExpenses.filter(e => e.direction === 'offset').length > 0 && (
+                <div className={styles.breakdownSection}>
+                  <div className={styles.breakdownSectionTitle}>{debt.to_user_name} is owed from:</div>
+                  {relatedExpenses.filter(e => e.direction === 'offset').map((exp) => {
+                    const cat = getCategoryByKey(exp.category);
+                    return (
+                      <div key={`offset-${exp.id}`} className={styles.breakdownRow}>
+                        <span className={styles.breakdownCat}>{cat.emoji}</span>
+                        <div className={styles.breakdownInfo}>
+                          <span className={styles.breakdownDesc}>{exp.description}</span>
+                          <span className={styles.breakdownMeta}>
+                            {formatDate(exp.date)} &middot; {exp.detail}
+                          </span>
+                        </div>
+                        <div className={styles.breakdownAmounts}>
+                          <span className={`${styles.breakdownNet} ${styles.positive}`}>
+                            +{formatCurrency(exp.amount_owed)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            );
-          })}
+              )}
+            </>
+          ) : (
+            relatedExpenses.map((exp) => {
+              const cat = getCategoryByKey(exp.category);
+              const isOffset = exp.direction === 'offset';
+              return (
+                <div key={`${exp.id}-${exp.direction}`} className={styles.breakdownRow}>
+                  <span className={styles.breakdownCat}>{cat.emoji}</span>
+                  <div className={styles.breakdownInfo}>
+                    <span className={styles.breakdownDesc}>{exp.description}</span>
+                    <span className={styles.breakdownMeta}>
+                      {formatDate(exp.date)} &middot; Total: {formatCurrency(exp.total_amount)}
+                    </span>
+                  </div>
+                  <div className={styles.breakdownAmounts}>
+                    <span className={`${styles.breakdownNet} ${isOffset ? styles.positive : styles.negative}`}>
+                      {isOffset ? '-' : '+'}{formatCurrency(exp.amount_owed)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
           <div className={styles.breakdownTotal}>
             <span>Net total</span>
             <span className={styles.negative}>{formatCurrency(debt.amount)}</span>

@@ -150,6 +150,42 @@ function computeGroupBalances(groupId) {
     to_user_name: memberMap[b.to_user] || 'Unknown',
   }));
 
+  // Convert per-expense objects to arrays
+  const pairExpenses = Object.fromEntries(
+    Object.entries(pairExpenseDebts).map(([key, expMap]) => [key, Object.values(expMap)])
+  );
+
+  // Also build per-member expense breakdown (for simplified debt view)
+  // Shows each member's net position per expense
+  const memberExpenses = {};
+  for (const expense of allExpenses) {
+    const payers = db.prepare(
+      'SELECT user_id, amount FROM expense_payers WHERE expense_id = ?'
+    ).all(expense.id);
+    const splits = db.prepare(
+      'SELECT user_id, amount FROM expense_splits WHERE expense_id = ?'
+    ).all(expense.id);
+
+    for (const m of members) {
+      const paidAmount = payers.filter(p => p.user_id === m.id).reduce((s, p) => s + p.amount, 0);
+      const splitAmount = splits.filter(s => s.user_id === m.id).reduce((s, s2) => s + s2.amount, 0);
+      const net = paidAmount - splitAmount;
+      if (net === 0) continue;
+
+      if (!memberExpenses[m.id]) memberExpenses[m.id] = [];
+      memberExpenses[m.id].push({
+        id: expense.id,
+        description: expense.description,
+        total_amount: expense.amount,
+        date: expense.date,
+        category: expense.category,
+        paid: paidAmount,
+        share: splitAmount,
+        net: net, // positive = they paid more than their share, negative = they owe
+      });
+    }
+  }
+
   return {
     balances: enrichedBalances,
     memberBalances: Object.entries(memberBalances).map(([userId, balance]) => ({
@@ -158,10 +194,8 @@ function computeGroupBalances(groupId) {
       balance,
     })),
     simplify_debts: Boolean(group.simplify_debts),
-    // Convert per-expense objects to arrays
-    pairExpenses: Object.fromEntries(
-      Object.entries(pairExpenseDebts).map(([key, expMap]) => [key, Object.values(expMap)])
-    ),
+    pairExpenses,
+    memberExpenses,
   };
 }
 
