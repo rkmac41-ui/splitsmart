@@ -11,8 +11,9 @@ import Modal from '../../components/Modal/Modal';
 import ExpenseForm from '../../components/ExpenseForm/ExpenseForm';
 import BalanceList from '../../components/BalanceList/BalanceList';
 import ActivityFeed from '../../components/ActivityFeed/ActivityFeed';
+import Avatar from '../../components/Avatar/Avatar';
 import { formatCurrency, formatDate, centsToDollars } from '../../utils/formatters';
-import { getCategoryByKey } from '../../utils/constants';
+import { getCategoryByKey, SPLIT_TYPES } from '../../utils/constants';
 import styles from './GroupPage.module.css';
 
 export default function GroupPage() {
@@ -51,6 +52,7 @@ export default function GroupPage() {
   // Modals
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [viewingExpense, setViewingExpense] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddTrip, setShowAddTrip] = useState(false);
   const [showSettleUp, setShowSettleUp] = useState(null);
@@ -110,6 +112,7 @@ export default function GroupPage() {
       await expensesApi.updateExpense(groupId, editingExpense.id, data);
       showToast('Expense updated', 'success');
       setEditingExpense(null);
+      setViewingExpense(null);
       fetchAll();
     } catch (err) {
       showToast(err.response?.data?.error || 'Failed to update expense', 'error');
@@ -123,6 +126,7 @@ export default function GroupPage() {
     try {
       await expensesApi.deleteExpense(groupId, expenseId);
       showToast('Expense deleted', 'success');
+      setViewingExpense(null);
       fetchAll();
     } catch (err) {
       showToast('Failed to delete expense', 'error');
@@ -188,6 +192,23 @@ export default function GroupPage() {
     }
   };
 
+  // Helper: Check if a set of expenses is fully settled (all member nets ~= 0)
+  const isExpensesSettled = (expenseList) => {
+    if (!expenseList || expenseList.length === 0) return false;
+    const memberNets = {};
+    for (const exp of expenseList) {
+      if (!exp.payers || !exp.splits) continue;
+      for (const p of exp.payers) {
+        memberNets[p.user_id] = (memberNets[p.user_id] || 0) + p.amount;
+      }
+      for (const s of exp.splits) {
+        memberNets[s.user_id] = (memberNets[s.user_id] || 0) - s.amount;
+      }
+    }
+    // Check if all nets are effectively zero (within rounding tolerance)
+    return Object.values(memberNets).every(n => Math.abs(n) < 2);
+  };
+
   const inviteUrl = inviteLink ? `${window.location.origin}/invite/${inviteLink}` : '';
 
   if (loading) {
@@ -196,6 +217,19 @@ export default function GroupPage() {
 
   if (!group) {
     return <div className={styles.notFound}>Group not found</div>;
+  }
+
+  // Split trips into active and settled for Trips tab
+  const nonTripExpenses = expenses.filter(e => !e.trip_id);
+  const activeTrips = [];
+  const settledTrips = [];
+  for (const trip of trips) {
+    const tripExps = expenses.filter(e => e.trip_id === trip.id);
+    if (tripExps.length > 0 && isExpensesSettled(tripExps)) {
+      settledTrips.push(trip);
+    } else {
+      activeTrips.push(trip);
+    }
   }
 
   return (
@@ -245,8 +279,7 @@ export default function GroupPage() {
               <ExpensesByTrip
                 expenses={expenses}
                 trips={trips}
-                onEdit={setEditingExpense}
-                onDelete={handleDeleteExpense}
+                onView={setViewingExpense}
               />
             )}
           </div>
@@ -285,25 +318,61 @@ export default function GroupPage() {
             <button className={styles.addTripBtn} onClick={() => setShowAddTrip(true)}>
               + Create Trip
             </button>
-            {trips.length === 0 ? (
-              <div className={styles.empty}><p>No trips yet</p></div>
-            ) : (
+
+            {/* Active Trips */}
+            {activeTrips.length > 0 && (
               <div className={styles.tripList}>
-                {trips.map(trip => {
+                {activeTrips.map(trip => {
                   const tripExpenses = expenses.filter(e => e.trip_id === trip.id);
                   return (
                     <TripAccordion
                       key={trip.id}
                       trip={trip}
                       tripExpenses={tripExpenses}
-                      onEdit={setEditingExpense}
-                      onDelete={handleDeleteExpense}
+                      onView={setViewingExpense}
                       groupId={groupId}
                       onAddExpense={() => setShowAddExpense(true)}
+                      settled={false}
                     />
                   );
                 })}
               </div>
+            )}
+
+            {/* Non-trip expenses grouped by month */}
+            <NonTripAccordion
+              expenses={nonTripExpenses}
+              onView={setViewingExpense}
+              isExpensesSettled={isExpensesSettled}
+            />
+
+            {/* Settled Trips */}
+            {settledTrips.length > 0 && (
+              <>
+                <div className={styles.settledDivider}>
+                  <span>Settled</span>
+                </div>
+                <div className={styles.tripList}>
+                  {settledTrips.map(trip => {
+                    const tripExpenses = expenses.filter(e => e.trip_id === trip.id);
+                    return (
+                      <TripAccordion
+                        key={trip.id}
+                        trip={trip}
+                        tripExpenses={tripExpenses}
+                        onView={setViewingExpense}
+                        groupId={groupId}
+                        onAddExpense={() => setShowAddExpense(true)}
+                        settled={true}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {activeTrips.length === 0 && settledTrips.length === 0 && nonTripExpenses.length === 0 && (
+              <div className={styles.empty}><p>No trips yet</p></div>
             )}
           </div>
         )}
@@ -312,6 +381,23 @@ export default function GroupPage() {
           <ActivityFeed activities={activity} />
         )}
       </div>
+
+      {/* Expense Detail Modal */}
+      <Modal isOpen={Boolean(viewingExpense)} onClose={() => setViewingExpense(null)} title="Expense Details" size="medium">
+        {viewingExpense && (
+          <ExpenseDetail
+            expense={viewingExpense}
+            members={members}
+            trips={trips}
+            onEdit={() => {
+              const exp = viewingExpense;
+              setViewingExpense(null);
+              setEditingExpense(exp);
+            }}
+            onDelete={() => handleDeleteExpense(viewingExpense.id)}
+          />
+        )}
+      </Modal>
 
       {/* Add Expense Modal */}
       <Modal isOpen={showAddExpense} onClose={() => setShowAddExpense(false)} title="Add Expense" size="large">
@@ -412,6 +498,170 @@ export default function GroupPage() {
   );
 }
 
+/* ─── Expense Detail View ─── */
+function ExpenseDetail({ expense, members, trips, onEdit, onDelete }) {
+  const cat = getCategoryByKey(expense.category);
+  const trip = trips.find(t => t.id === expense.trip_id);
+  const splitType = SPLIT_TYPES.find(s => s.key === expense.split_type) || { label: 'Equal' };
+
+  return (
+    <div className={styles.expenseDetail}>
+      <div className={styles.detailHeader}>
+        <span className={styles.detailCatIcon}>{cat.emoji}</span>
+        <div>
+          <h3 className={styles.detailTitle}>{expense.description}</h3>
+          <span className={styles.detailCategory}>{cat.label}</span>
+        </div>
+        <span className={styles.detailAmount}>{formatCurrency(expense.amount)}</span>
+      </div>
+
+      <div className={styles.detailMeta}>
+        <div className={styles.detailRow}>
+          <span className={styles.detailLabel}>Date</span>
+          <span>{formatDate(expense.date)}</span>
+        </div>
+        {trip && (
+          <div className={styles.detailRow}>
+            <span className={styles.detailLabel}>Trip</span>
+            <span>{trip.name}</span>
+          </div>
+        )}
+        <div className={styles.detailRow}>
+          <span className={styles.detailLabel}>Split method</span>
+          <span>{splitType.label}</span>
+        </div>
+      </div>
+
+      {/* Paid by */}
+      <div className={styles.detailSection}>
+        <h4 className={styles.detailSectionTitle}>Paid by</h4>
+        {(expense.payers || []).map(p => (
+          <div key={p.user_id} className={styles.detailMemberRow}>
+            <Avatar name={p.user_name} size="small" />
+            <span className={styles.detailMemberName}>{p.user_name}</span>
+            <span className={styles.detailMemberAmount}>{formatCurrency(p.amount)}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Split between */}
+      <div className={styles.detailSection}>
+        <h4 className={styles.detailSectionTitle}>Split between</h4>
+        {(expense.splits || []).map(s => (
+          <div key={s.user_id} className={styles.detailMemberRow}>
+            <Avatar name={s.user_name} size="small" />
+            <span className={styles.detailMemberName}>{s.user_name}</span>
+            <span className={styles.detailMemberAmount}>{formatCurrency(s.amount)}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Actions */}
+      <div className={styles.detailActions}>
+        <button className={styles.detailEditBtn} onClick={onEdit}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Edit
+        </button>
+        <button className={styles.detailDeleteBtn} onClick={onDelete}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Non-Trip Expenses Accordion (grouped by month) ─── */
+function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!expenses || expenses.length === 0) return null;
+
+  // Group expenses by month
+  const monthGroups = {};
+  for (const exp of expenses) {
+    const d = exp.date ? new Date(String(exp.date).split('T')[0]) : null;
+    const key = d && !isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'Unknown';
+    if (!monthGroups[key]) monthGroups[key] = [];
+    monthGroups[key].push(exp);
+  }
+
+  // Sort months descending
+  const sortedMonths = Object.keys(monthGroups).sort((a, b) => b.localeCompare(a));
+
+  const total = expenses.reduce((s, e) => s + e.amount, 0);
+
+  // Check which individual expenses are settled
+  // We determine "settled" per expense: if all member nets for that expense are zero
+  const isOneExpenseSettled = (exp) => {
+    if (!exp.payers || !exp.splits) return false;
+    return isExpensesSettled([exp]);
+  };
+
+  // Is the entire non-trip section settled?
+  const allSettled = isExpensesSettled(expenses);
+
+  return (
+    <div className={`${styles.tripAccordion} ${allSettled ? styles.settledAccordion : ''}`}>
+      <button
+        className={styles.tripAccordionHeader}
+        onClick={() => setExpanded(!expanded)}
+        type="button"
+      >
+        <div className={styles.tripInfo}>
+          <span className={styles.tripName}>
+            Others - non trip expenses
+            {allSettled && <span className={styles.settledBadge}>Settled</span>}
+          </span>
+          <span className={styles.tripMeta}>
+            {expenses.length} expense{expenses.length !== 1 ? 's' : ''} &middot; {formatCurrency(total)}
+          </span>
+        </div>
+        <svg
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2"
+          className={`${styles.tripChevron} ${expanded ? styles.tripChevronOpen : ''}`}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className={styles.tripAccordionBody}>
+          {sortedMonths.map(monthKey => {
+            const monthExps = monthGroups[monthKey];
+            const monthTotal = monthExps.reduce((s, e) => s + e.amount, 0);
+            // Format month header
+            let monthLabel = monthKey;
+            if (monthKey !== 'Unknown') {
+              const [y, m] = monthKey.split('-');
+              const d = new Date(Number(y), Number(m) - 1);
+              monthLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            }
+
+            return (
+              <div key={monthKey} className={styles.monthGroup}>
+                <div className={styles.monthHeader}>
+                  <span>{monthLabel}</span>
+                  <span className={styles.monthTotal}>{formatCurrency(monthTotal)}</span>
+                </div>
+                {monthExps.map(expense => (
+                  <ExpenseRow
+                    key={expense.id}
+                    expense={expense}
+                    onView={onView}
+                    settled={isOneExpenseSettled(expense)}
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Settle Up Form ─── */
 function SettleUpForm({ debt, onSubmit, onCancel }) {
   const [amount, setAmount] = useState(centsToDollars(debt.amount));
 
@@ -595,18 +845,21 @@ function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInv
   );
 }
 
-function TripAccordion({ trip, tripExpenses, onEdit, onDelete, groupId, onAddExpense }) {
+function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, settled }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className={styles.tripAccordion}>
+    <div className={`${styles.tripAccordion} ${settled ? styles.settledAccordion : ''}`}>
       <button
         className={styles.tripAccordionHeader}
         onClick={() => setExpanded(!expanded)}
         type="button"
       >
         <div className={styles.tripInfo}>
-          <span className={styles.tripName}>{trip.name}</span>
+          <span className={styles.tripName}>
+            {trip.name}
+            {settled && <span className={styles.settledBadge}>Settled</span>}
+          </span>
           <span className={styles.tripMeta}>
             {tripExpenses.length} expense{tripExpenses.length !== 1 ? 's' : ''} &middot; {formatCurrency(trip.total_amount)}
           </span>
@@ -630,7 +883,7 @@ function TripAccordion({ trip, tripExpenses, onEdit, onDelete, groupId, onAddExp
             </div>
           ) : (
             tripExpenses.map(expense => (
-              <ExpenseRow key={expense.id} expense={expense} onEdit={onEdit} onDelete={onDelete} />
+              <ExpenseRow key={expense.id} expense={expense} onView={onView} settled={settled} />
             ))
           )}
         </div>
@@ -639,7 +892,7 @@ function TripAccordion({ trip, tripExpenses, onEdit, onDelete, groupId, onAddExp
   );
 }
 
-function ExpensesByTrip({ expenses, trips, onEdit, onDelete }) {
+function ExpensesByTrip({ expenses, trips, onView }) {
   // Group expenses by trip
   const tripMap = {};
   for (const t of trips) {
@@ -665,7 +918,7 @@ function ExpensesByTrip({ expenses, trips, onEdit, onDelete }) {
   // If no trips at all, just show flat list
   if (orderedKeys.length === 1 && orderedKeys[0] === '__none__') {
     return grouped.__none__.map(expense => (
-      <ExpenseRow key={expense.id} expense={expense} onEdit={onEdit} onDelete={onDelete} />
+      <ExpenseRow key={expense.id} expense={expense} onView={onView} />
     ));
   }
 
@@ -690,17 +943,23 @@ function ExpensesByTrip({ expenses, trips, onEdit, onDelete }) {
           </span>
         </div>
         {exps.map(expense => (
-          <ExpenseRow key={expense.id} expense={expense} onEdit={onEdit} onDelete={onDelete} />
+          <ExpenseRow key={expense.id} expense={expense} onView={onView} />
         ))}
       </div>
     );
   });
 }
 
-function ExpenseRow({ expense, onEdit, onDelete }) {
+function ExpenseRow({ expense, onView, settled }) {
   const cat = getCategoryByKey(expense.category);
   return (
-    <div className={styles.expenseItem}>
+    <div
+      className={`${styles.expenseItem} ${settled ? styles.settledExpense : ''}`}
+      onClick={() => onView(expense)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onView(expense); }}
+    >
       <span className={styles.expenseCat}>{cat.emoji}</span>
       <div className={styles.expenseInfo}>
         <span className={styles.expenseDesc}>{expense.description}</span>
@@ -710,14 +969,6 @@ function ExpenseRow({ expense, onEdit, onDelete }) {
       </div>
       <div className={styles.expenseRight}>
         <span className={styles.expenseAmount}>{formatCurrency(expense.amount)}</span>
-        <div className={styles.expenseActions}>
-          <button className={styles.editBtn} onClick={() => onEdit(expense)} title="Edit">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button className={styles.deleteBtn} onClick={() => onDelete(expense.id)} title="Delete">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-          </button>
-        </div>
       </div>
     </div>
   );
