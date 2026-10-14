@@ -36,7 +36,10 @@ router.post('/:groupId/expenses', groupAccess, validate(createExpenseSchema), (r
 // Get expense
 router.get('/:groupId/expenses/:expenseId', groupAccess, (req, res, next) => {
   try {
-    const expense = expenseService.getExpenseById(req.params.expenseId, req.params.groupId);
+    // ?include_deleted=1 lets the client show a deleted expense so it can be restored
+    const expense = expenseService.getExpenseById(req.params.expenseId, req.params.groupId, {
+      includeDeleted: req.query.include_deleted === '1',
+    });
     res.json({ expense });
   } catch (err) {
     next(err);
@@ -63,6 +66,16 @@ router.delete('/:groupId/expenses/:expenseId', groupAccess, (req, res, next) => 
   try {
     expenseService.deleteExpense(req.params.expenseId, req.user.id, req.params.groupId);
     res.json({ message: 'Expense deleted' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Restore a deleted expense
+router.post('/:groupId/expenses/:expenseId/restore', groupAccess, (req, res, next) => {
+  try {
+    const expense = expenseService.restoreExpense(req.params.expenseId, req.user.id, req.params.groupId);
+    res.json({ expense });
   } catch (err) {
     next(err);
   }

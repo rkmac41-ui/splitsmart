@@ -17,8 +17,16 @@ export default function ToastContainer() {
             {toast.type === 'warning' && '\u26A0'}
           </span>
           <span className={styles.message}>{toast.message}</span>
+          {toast.action && (
+            <button
+              className={styles.action}
+              onClick={() => { removeToast(toast.id); toast.action.onClick(); }}
+            >
+              {toast.action.label}
+            </button>
+          )}
           <button className={styles.close} onClick={() => removeToast(toast.id)}>
-            \u2715
+            {'\u2715'}
           </button>
         </div>
       ))}

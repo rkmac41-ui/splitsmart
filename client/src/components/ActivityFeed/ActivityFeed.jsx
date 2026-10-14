@@ -6,7 +6,11 @@ const ACTION_ICONS = {
   expense_added: '+',
   expense_edited: '\u270E',
   expense_deleted: '\u2717',
+  expense_restored: '\u21BA',
   payment_recorded: '\uD83D\uDCB0',
+  payment_edited: '\u270E',
+  payment_deleted: '\u2717',
+  payment_restored: '\u21BA',
   member_joined: '\u2192',
   member_left: '\u2190',
   member_removed: '\u2190',
@@ -19,7 +23,11 @@ const ACTION_COLORS = {
   expense_added: 'var(--color-success)',
   expense_edited: 'var(--color-info)',
   expense_deleted: 'var(--color-danger)',
+  expense_restored: 'var(--color-success)',
   payment_recorded: 'var(--color-primary)',
+  payment_edited: 'var(--color-info)',
+  payment_deleted: 'var(--color-danger)',
+  payment_restored: 'var(--color-success)',
   member_joined: 'var(--color-success)',
   member_left: 'var(--color-warning)',
   member_removed: 'var(--color-danger)',
@@ -49,8 +57,20 @@ function getDescription(activity) {
       return `${user_name} edited an expense`;
     case 'expense_deleted':
       return `${user_name} deleted "${meta.description}" (${formatCurrency(meta.amount)})`;
+    case 'expense_restored':
+      return `${user_name} restored "${meta.description}" (${formatCurrency(meta.amount)})`;
     case 'payment_recorded':
       return `${meta.payer_name} paid ${meta.payee_name} ${formatCurrency(meta.amount)}`;
+    case 'payment_edited':
+      if (meta.old && meta.new) {
+        return `${user_name} edited a payment: ${meta.new.payer_name} paid ${meta.new.payee_name} ${formatCurrency(meta.new.amount)}`
+          + (meta.old.amount !== meta.new.amount ? ` (was ${formatCurrency(meta.old.amount)})` : '');
+      }
+      return `${user_name} edited a payment`;
+    case 'payment_deleted':
+      return `${user_name} deleted a payment: ${meta.payer_name} paid ${meta.payee_name} ${formatCurrency(meta.amount)}`;
+    case 'payment_restored':
+      return `${user_name} restored a payment: ${meta.payer_name} paid ${meta.payee_name} ${formatCurrency(meta.amount)}`;
     case 'member_joined':
       return `${meta.member_name || user_name} joined the group`;
     case 'member_left':
@@ -70,17 +90,16 @@ function getDescription(activity) {
 
 /**
  * Where an activity item should take the user when clicked, or null if it
- * has nothing to link to. Expenses open their detail view on the group page.
+ * has nothing to link to. Expenses and payments open their detail view on the
+ * group page (deleted ones open with a Restore button).
  */
 function getActivityLink(activity) {
   const { action, entity_type, entity_id, group_id } = activity;
   if (!group_id) return null;
   const base = `/groups/${group_id}`;
 
-  if (entity_type === 'expense' && action !== 'expense_deleted' && entity_id) {
-    return `${base}?expense=${entity_id}`;
-  }
-  if (entity_type === 'payment') return `${base}?tab=balances`;
+  if (entity_type === 'expense' && entity_id) return `${base}?expense=${entity_id}`;
+  if (entity_type === 'payment' && entity_id) return `${base}?payment=${entity_id}`;
   if (entity_type === 'trip' && action !== 'trip_deleted') return `${base}?tab=trips`;
   return null;
 }

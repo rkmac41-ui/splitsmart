@@ -124,13 +124,13 @@ function getGroupExpenses(groupId, tripId = null) {
   return expenses.map(e => ({ ...enrichExpense(e), is_settled: settledExpenseIds.has(e.id) }));
 }
 
-function getExpenseById(expenseId, groupId) {
+function getExpenseById(expenseId, groupId, { includeDeleted = false } = {}) {
   const expense = db.prepare(`
     SELECT e.*, u.name as created_by_name
     FROM expenses e
     JOIN users u ON u.id = e.created_by
-    WHERE e.id = ? AND e.is_deleted = 0
-  `).get(expenseId);
+    WHERE e.id = ? AND (e.is_deleted = 0 OR ?)
+  `).get(expenseId, includeDeleted ? 1 : 0);
 
   // Scope to the group the caller has access to, so a member of one group
   // can't read or modify another group's expenses by guessing IDs.
@@ -255,10 +255,51 @@ function deleteExpense(expenseId, userId, groupId) {
   return expense;
 }
 
+/**
+ * Undo a delete. Everyone on the expense must still be in the group, otherwise
+ * restoring would create a debt for someone who has already left.
+ */
+function restoreExpense(expenseId, userId, groupId) {
+  const expense = getExpenseById(expenseId, groupId, { includeDeleted: true });
+  if (!expense.is_deleted) throw new ValidationError('Expense is not deleted');
+
+  const members = new Set(loadMembers(expense.group_id).map(m => m.id));
+  const missing = [...expense.payers, ...expense.splits].find(p => !members.has(p.user_id));
+  if (missing) {
+    throw new ValidationError(
+      `Can't restore: ${missing.user_name || 'someone on this expense'} is no longer in the group`
+    );
+  }
+
+  const user = db.prepare('SELECT name FROM users WHERE id = ?').get(userId);
+
+  db.transaction(() => {
+    db.prepare("UPDATE expenses SET is_deleted = 0, updated_at = datetime('now') WHERE id = ?").run(expenseId);
+
+    activityService.logActivity(expense.group_id, userId, 'expense_restored', 'expense', expense.id, {
+      description: expense.description,
+      amount: expense.amount,
+    });
+
+    const formattedAmount = (expense.amount / 100).toFixed(2);
+    notificationService.notifyGroupMembers(
+      'expense_restored',
+      expense.group_id,
+      userId,
+      'expense',
+      expense.id,
+      `${user.name} restored "${expense.description}" ($${formattedAmount})`
+    );
+  })();
+
+  return getExpenseById(expenseId, groupId);
+}
+
 module.exports = {
   createExpense,
   getGroupExpenses,
   getExpenseById,
   updateExpense,
   deleteExpense,
+  restoreExpense,
 };

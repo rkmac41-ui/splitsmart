@@ -670,3 +670,26 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ─── Deleted items & payment history ─── */
+.deletedBanner {
+  background: var(--color-danger-light, #fdecea);
+  color: var(--color-danger);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-md);
+}
+
+.paymentHistory {
+  margin-top: var(--space-xl, 32px);
+}
+
+.paymentHistoryTitle {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-sm);
+}

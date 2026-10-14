@@ -8,4 +8,11 @@ const createPaymentSchema = Joi.object({
   note: Joi.string().max(200).allow('', null).trim(),
 });
 
-module.exports = { createPaymentSchema };
+const updatePaymentSchema = Joi.object({
+  payer_id: Joi.number().integer().not(0),
+  payee_id: Joi.number().integer().not(0),
+  amount: Joi.number().integer().positive().required(),
+  note: Joi.string().max(200).allow('', null).trim(),
+});
+
+module.exports = { createPaymentSchema, updatePaymentSchema };

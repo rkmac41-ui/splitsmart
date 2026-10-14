@@ -70,7 +70,7 @@ function getSettlementState(groupId) {
   }
 
   const payments = db.prepare(
-    'SELECT id, payer_id, payee_id, amount, created_at FROM payments WHERE group_id = ?'
+    'SELECT id, payer_id, payee_id, amount, created_at FROM payments WHERE group_id = ? AND is_deleted = 0'
   ).all(groupId);
 
   // Chronological timeline. On a timestamp tie, expenses go before payments
@@ -451,7 +451,7 @@ function computeDetailedBreakdown(groupId) {
     FROM payments p
     LEFT JOIN users payer ON payer.id = p.payer_id
     LEFT JOIN users payee ON payee.id = p.payee_id
-    WHERE p.group_id = ?
+    WHERE p.group_id = ? AND p.is_deleted = 0
     ORDER BY p.created_at DESC
   `).all(groupId);
 

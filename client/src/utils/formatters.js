@@ -34,8 +34,8 @@ export function centsToDollars(cents) {
  */
 export function formatDate(dateStr) {
   if (!dateStr) return '';
-  // Handle both "YYYY-MM-DD" and full ISO datetime strings
-  const dateOnly = String(dateStr).split('T')[0];
+  // Handle "YYYY-MM-DD", ISO datetimes and SQLite's "YYYY-MM-DD HH:MM:SS"
+  const dateOnly = String(dateStr).split(/[T ]/)[0];
   const date = new Date(dateOnly + 'T00:00:00');
   if (isNaN(date.getTime())) return '';
   return date.toLocaleDateString('en-US', {

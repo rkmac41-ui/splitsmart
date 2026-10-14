@@ -21,11 +21,12 @@ export default function NotificationDropdown({ onClose }) {
       // Navigate to the group: open the expense itself when there is one,
       // otherwise switch to the relevant tab
       const base = `/groups/${notification.group_id}`;
-      if (notification.entity_type === 'expense' && notification.type !== 'expense_deleted') {
+      if (notification.entity_type === 'expense' && notification.entity_id) {
         navigate(`${base}?expense=${notification.entity_id}`);
+      } else if (notification.entity_type === 'payment' && notification.entity_id) {
+        navigate(`${base}?payment=${notification.entity_id}`);
       } else {
-        const tab = notification.entity_type === 'payment' ? 'balances' : 'activity';
-        navigate(`${base}?tab=${tab}`);
+        navigate(`${base}?tab=activity`);
       }
     }
     onClose();
