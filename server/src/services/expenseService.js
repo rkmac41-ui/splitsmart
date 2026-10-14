@@ -2,11 +2,39 @@ const db = require('../db/connection');
 const { NotFoundError, ValidationError } = require('../utils/errors');
 const { calculateSplit } = require('../utils/splitCalculator');
 const activityService = require('./activityService');
-const { getSettlementState } = require('./balanceService');
+const { getSettlementState, loadMembers } = require('./balanceService');
 const notificationService = require('./notificationService');
+
+/**
+ * Make sure everyone on the expense belongs to the group and the trip (if any)
+ * is one of the group's trips. `alsoAllowed` lets an edit keep people who were
+ * already on the expense even if they have since left the group.
+ */
+function validateParticipants(groupId, { trip_id, payers, splits }, alsoAllowed = []) {
+  const allowed = new Set([...loadMembers(groupId).map(m => m.id), ...alsoAllowed]);
+
+  for (const [label, list] of [['payer', payers], ['split', splits]]) {
+    const seen = new Set();
+    for (const { user_id } of list) {
+      if (!allowed.has(user_id)) {
+        throw new ValidationError(`Every ${label} must be a member of this group`);
+      }
+      if (seen.has(user_id)) {
+        throw new ValidationError(`The same person is listed twice as a ${label}`);
+      }
+      seen.add(user_id);
+    }
+  }
+
+  if (trip_id !== null && trip_id !== undefined) {
+    const trip = db.prepare('SELECT id FROM trips WHERE id = ? AND group_id = ?').get(trip_id, groupId);
+    if (!trip) throw new ValidationError('Trip not found in this group');
+  }
+}
 
 function createExpense(groupId, data, userId) {
   const { description, amount, category, split_type, date, trip_id, payers, splits } = data;
+  validateParticipants(groupId, data);
 
   // Validate payers sum equals total
   const payerSum = payers.reduce((s, p) => s + p.amount, 0);
@@ -142,6 +170,10 @@ function enrichExpense(expense) {
 function updateExpense(expenseId, data, userId, groupId) {
   const oldExpense = getExpenseById(expenseId, groupId);
   const { description, amount, category, split_type, date, trip_id, payers, splits } = data;
+  validateParticipants(oldExpense.group_id, data, [
+    ...oldExpense.payers.map(p => p.user_id),
+    ...oldExpense.splits.map(s => s.user_id),
+  ]);
 
   // Validate payers sum
   const payerSum = payers.reduce((s, p) => s + p.amount, 0);

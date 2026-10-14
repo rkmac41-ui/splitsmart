@@ -24,6 +24,7 @@ router.post('/:groupId/payments', groupAccess, validate(createPaymentSchema), (r
     const payment = paymentService.recordPayment(
       Number(req.params.groupId),
       req.user.id,
+      req.body.payer_id ?? req.user.id, // defaults to "I paid"
       req.body.payee_id,
       req.body.amount,
       req.body.note

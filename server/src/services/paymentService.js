@@ -2,66 +2,81 @@ const db = require('../db/connection');
 const { NotFoundError, ValidationError } = require('../utils/errors');
 const activityService = require('./activityService');
 const notificationService = require('./notificationService');
+const { loadMembers } = require('./balanceService');
 
-function recordPayment(groupId, payerId, payeeId, amount, note) {
+// Payer/payee may be placeholder members (negative IDs), so resolve names either way
+const PAYMENT_SELECT = `
+  SELECT p.*,
+    CASE WHEN p.payer_id > 0 THEN payer.name
+         ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -p.payer_id)
+    END as payer_name,
+    CASE WHEN p.payee_id > 0 THEN payee.name
+         ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -p.payee_id)
+    END as payee_name
+  FROM payments p
+  LEFT JOIN users payer ON payer.id = p.payer_id
+  LEFT JOIN users payee ON payee.id = p.payee_id
+`;
+
+/**
+ * Record that payerId paid payeeId. Any group member can record a payment
+ * between any two participants (e.g. "Bob paid me in cash", or settling up
+ * with a placeholder member who hasn't joined yet).
+ */
+function recordPayment(groupId, recorderId, payerId, payeeId, amount, note) {
   if (payerId === payeeId) {
-    throw new ValidationError('Cannot pay yourself');
+    throw new ValidationError('Payer and payee must be different people');
   }
 
-  // Verify both are group members
-  const payerMember = db.prepare(
-    'SELECT user_id FROM group_members WHERE group_id = ? AND user_id = ?'
-  ).get(groupId, payerId);
-  const payeeMember = db.prepare(
-    'SELECT user_id FROM group_members WHERE group_id = ? AND user_id = ?'
-  ).get(groupId, payeeId);
-
-  if (!payerMember || !payeeMember) {
+  const participants = new Map(loadMembers(groupId).map(m => [m.id, m.name]));
+  if (!participants.has(payerId) || !participants.has(payeeId)) {
     throw new ValidationError('Both payer and payee must be group members');
   }
 
-  const payer = db.prepare('SELECT name FROM users WHERE id = ?').get(payerId);
-  const payee = db.prepare('SELECT name FROM users WHERE id = ?').get(payeeId);
+  const payerName = participants.get(payerId);
+  const payeeName = participants.get(payeeId);
+  const recorder = db.prepare('SELECT name FROM users WHERE id = ?').get(recorderId);
 
   const paymentId = db.transaction(() => {
     const result = db.prepare(
-      'INSERT INTO payments (group_id, payer_id, payee_id, amount, note) VALUES (?, ?, ?, ?, ?)'
-    ).run(groupId, payerId, payeeId, amount, note || null);
+      'INSERT INTO payments (group_id, payer_id, payee_id, amount, note, recorded_by) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(groupId, payerId, payeeId, amount, note || null, recorderId);
 
     const pid = result.lastInsertRowid;
 
-    activityService.logActivity(groupId, payerId, 'payment_recorded', 'payment', pid, {
-      payer_name: payer.name,
-      payee_name: payee.name,
+    activityService.logActivity(groupId, recorderId, 'payment_recorded', 'payment', pid, {
+      payer_name: payerName,
+      payee_name: payeeName,
       amount,
     });
 
     const formattedAmount = (amount / 100).toFixed(2);
-    notificationService.createNotification(
-      'payment_recorded',
-      groupId,
-      payerId,
-      'payment',
-      pid,
-      [payeeId],
-      `${payer.name} paid you $${formattedAmount}`
-    );
+    const recordedBy = recorderId !== payerId ? ` (recorded by ${recorder.name})` : '';
 
-    // Also notify other group members
-    const members = db.prepare(
+    // The payee hears "X paid you", the payer "you paid Y" (when someone else
+    // recorded it), everyone else "X paid Y". Placeholders can't be notified.
+    if (payeeId > 0) {
+      notificationService.createNotification(
+        'payment_recorded', groupId, recorderId, 'payment', pid, [payeeId],
+        `${payerName} paid you $${formattedAmount}${recordedBy}`
+      );
+    }
+    if (payerId > 0) {
+      notificationService.createNotification(
+        'payment_recorded', groupId, recorderId, 'payment', pid, [payerId],
+        `You paid ${payeeName} $${formattedAmount}${recordedBy}`
+      );
+    }
+
+    const others = db.prepare(
       'SELECT user_id FROM group_members WHERE group_id = ? AND user_id NOT IN (?, ?)'
     ).all(groupId, payerId, payeeId);
 
-    if (members.length > 0) {
-      const memberIds = members.map(m => m.user_id);
+    if (others.length > 0) {
       notificationService.createNotification(
-        'payment_recorded',
-        groupId,
-        payerId,
-        'payment',
-        pid,
-        memberIds,
-        `${payer.name} paid ${payee.name} $${formattedAmount}`
+        'payment_recorded', groupId, recorderId, 'payment', pid,
+        others.map(m => m.user_id),
+        `${payerName} paid ${payeeName} $${formattedAmount}`
       );
     }
 
@@ -72,28 +87,14 @@ function recordPayment(groupId, payerId, payeeId, amount, note) {
 }
 
 function getGroupPayments(groupId) {
-  return db.prepare(`
-    SELECT p.*,
-      payer.name as payer_name,
-      payee.name as payee_name
-    FROM payments p
-    JOIN users payer ON payer.id = p.payer_id
-    JOIN users payee ON payee.id = p.payee_id
+  return db.prepare(`${PAYMENT_SELECT}
     WHERE p.group_id = ?
     ORDER BY p.created_at DESC
   `).all(groupId);
 }
 
 function getPaymentById(paymentId) {
-  const payment = db.prepare(`
-    SELECT p.*,
-      payer.name as payer_name,
-      payee.name as payee_name
-    FROM payments p
-    JOIN users payer ON payer.id = p.payer_id
-    JOIN users payee ON payee.id = p.payee_id
-    WHERE p.id = ?
-  `).get(paymentId);
+  const payment = db.prepare(`${PAYMENT_SELECT} WHERE p.id = ?`).get(paymentId);
 
   if (!payment) throw new NotFoundError('Payment not found');
   return payment;

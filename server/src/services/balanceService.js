@@ -1,6 +1,10 @@
 const db = require('../db/connection');
 const { simplifyDebts } = require('../utils/debtSimplifier');
 
+/**
+ * Everyone who can take part in a group's expenses and payments: current
+ * members plus unclaimed placeholder members (as negative IDs).
+ */
 function loadMembers(groupId) {
   // Real members
   const realMembers = db.prepare(`
@@ -211,6 +215,14 @@ function computeGroupBalances(groupId) {
   const memberMap = {};
   for (const m of members) {
     memberMap[m.id] = m.name;
+  }
+  // People who have since left the group can still appear in balances
+  // (e.g. an old expense they were in gets edited) - look up their names too
+  const nameStmt = db.prepare('SELECT name FROM users WHERE id = ?');
+  for (const id of Object.keys(memberBalances)) {
+    if (memberMap[id] === undefined && Number(id) > 0) {
+      memberMap[id] = nameStmt.get(Number(id))?.name;
+    }
   }
 
   const enrichedBalances = balances.map(b => ({
@@ -430,10 +442,15 @@ function computeDetailedBreakdown(groupId) {
   // Get payments
   const payments = db.prepare(`
     SELECT p.id, p.payer_id, p.payee_id, p.amount, p.created_at,
-      payer.name as payer_name, payee.name as payee_name
+      CASE WHEN p.payer_id > 0 THEN payer.name
+           ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -p.payer_id)
+      END as payer_name,
+      CASE WHEN p.payee_id > 0 THEN payee.name
+           ELSE (SELECT pm.name FROM placeholder_members pm WHERE pm.id = -p.payee_id)
+      END as payee_name
     FROM payments p
-    JOIN users payer ON payer.id = p.payer_id
-    JOIN users payee ON payee.id = p.payee_id
+    LEFT JOIN users payer ON payer.id = p.payer_id
+    LEFT JOIN users payee ON payee.id = p.payee_id
     WHERE p.group_id = ?
     ORDER BY p.created_at DESC
   `).all(groupId);
@@ -451,4 +468,5 @@ module.exports = {
   computeDashboardBalances,
   computeDetailedBreakdown,
   getSettlementState,
+  loadMembers,
 };

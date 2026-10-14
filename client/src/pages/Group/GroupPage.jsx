@@ -151,6 +151,7 @@ export default function GroupPage() {
   const handleSettleUp = async (amount) => {
     try {
       await paymentsApi.recordPayment(groupId, {
+        payer_id: showSettleUp.from_user,
         payee_id: showSettleUp.to_user,
         amount: amount,
         note: '',
@@ -203,7 +204,7 @@ export default function GroupPage() {
       showToast('Left group', 'success');
       navigate('/');
     } catch (err) {
-      showToast('Failed to leave group', 'error');
+      showToast(err.response?.data?.error || 'Failed to leave group', 'error');
     }
   };
 
@@ -432,6 +433,7 @@ export default function GroupPage() {
         {showSettleUp && (
           <SettleUpForm
             debt={showSettleUp}
+            userId={user.id}
             onSubmit={handleSettleUp}
             onCancel={() => setShowSettleUp(null)}
           />
@@ -453,7 +455,7 @@ export default function GroupPage() {
               showToast('Member removed', 'success');
               fetchAll();
             } catch (err) {
-              showToast('Failed to remove member', 'error');
+              showToast(err.response?.data?.error || 'Failed to remove member', 'error');
             }
           }}
           onAddPlaceholder={async (name) => {
@@ -651,7 +653,7 @@ function NonTripAccordion({ expenses, onView, allSettled }) {
 }
 
 /* ─── Settle Up Form ─── */
-function SettleUpForm({ debt, onSubmit, onCancel }) {
+function SettleUpForm({ debt, userId, onSubmit, onCancel }) {
   const [amount, setAmount] = useState(centsToDollars(debt.amount));
 
   const handleSubmit = (e) => {
@@ -663,7 +665,13 @@ function SettleUpForm({ debt, onSubmit, onCancel }) {
   return (
     <form onSubmit={handleSubmit}>
       <p style={{ marginBottom: 16, fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-        You owe <strong>{debt.to_user_name}</strong>
+        {debt.from_user === userId ? (
+          <>You pay <strong>{debt.to_user_name}</strong></>
+        ) : debt.to_user === userId ? (
+          <><strong>{debt.from_user_name}</strong> pays you</>
+        ) : (
+          <><strong>{debt.from_user_name}</strong> pays <strong>{debt.to_user_name}</strong></>
+        )}
       </p>
       <div style={{ marginBottom: 16 }}>
         <label className={styles.formLabel}>Amount ($)</label>

@@ -117,12 +117,12 @@ function DebtRow({ debt, userId, onSettleUp, pairExpenses, memberExpenses, isSim
           <span className={`${styles.amount} ${isYouOwe ? styles.negative : ''} ${isOwedToYou ? styles.positive : ''}`}>
             {formatCurrency(debt.amount)}
           </span>
-          {isYouOwe && onSettleUp && debt.to_user > 0 && debt.from_user > 0 && (
+          {onSettleUp && (
             <button
-              className={styles.settleBtn}
+              className={`${styles.settleBtn} ${isYouOwe ? '' : styles.recordBtn}`}
               onClick={(e) => { e.stopPropagation(); onSettleUp(debt); }}
             >
-              Settle up
+              {isYouOwe ? 'Settle up' : 'Record payment'}
             </button>
           )}
           {hasExpenses && (
