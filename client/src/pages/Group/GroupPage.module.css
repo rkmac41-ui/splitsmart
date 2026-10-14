@@ -363,6 +363,28 @@
   font-size: var(--font-size-sm);
 }
 
+.tripEmptyActions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-sm);
+}
+
+.deleteTripBtn {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  background: none;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+}
+
+.deleteTripBtn:hover {
+  background: var(--color-danger-light, #fdecea);
+}
+
 /* Empty state */
 .empty {
   text-align: center;
