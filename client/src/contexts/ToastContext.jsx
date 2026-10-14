@@ -7,13 +7,14 @@ let toastId = 0;
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
-  const showToast = useCallback((message, type = 'info') => {
+  // `action` is an optional { label, onClick } button, e.g. "Undo"
+  const showToast = useCallback((message, type = 'info', action = null) => {
     const id = ++toastId;
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => [...prev, { id, message, type, action }]);
 
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+    }, action ? 8000 : 4000);
   }, []);
 
   const removeToast = useCallback((id) => {

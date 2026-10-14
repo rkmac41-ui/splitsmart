@@ -18,9 +18,16 @@ export default function NotificationDropdown({ onClose }) {
       await markAsRead(notification.id);
     }
     if (notification.group_id) {
-      // Navigate to the group and switch to the relevant tab
-      const tab = notification.entity_type === 'expense' ? 'expenses' : 'activity';
-      navigate(`/groups/${notification.group_id}?tab=${tab}`);
+      // Navigate to the group: open the expense itself when there is one,
+      // otherwise switch to the relevant tab
+      const base = `/groups/${notification.group_id}`;
+      if (notification.entity_type === 'expense' && notification.entity_id) {
+        navigate(`${base}?expense=${notification.entity_id}`);
+      } else if (notification.entity_type === 'payment' && notification.entity_id) {
+        navigate(`${base}?payment=${notification.entity_id}`);
+      } else {
+        navigate(`${base}?tab=activity`);
+      }
     }
     onClose();
   };

@@ -26,6 +26,7 @@ export default function GroupPage() {
   const [group, setGroup] = useState(null);
   const [members, setMembers] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [trips, setTrips] = useState([]);
   const [balances, setBalances] = useState(null);
   const [detailedBalances, setDetailedBalances] = useState(null);
@@ -38,21 +39,11 @@ export default function GroupPage() {
     validTabs.includes(tabFromUrl) ? tabFromUrl : 'trips'
   );
 
-  // Sync tab from URL param (e.g. when clicking a notification)
-  useEffect(() => {
-    const tab = searchParams.get('tab');
-    if (tab && validTabs.includes(tab) && tab !== activeTab) {
-      setActiveTab(tab);
-      // Clean up the URL param
-      searchParams.delete('tab');
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, [searchParams]);
-
   // Modals
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [viewingExpense, setViewingExpense] = useState(null);
+  const [viewingPayment, setViewingPayment] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddTrip, setShowAddTrip] = useState(false);
   const [showSettleUp, setShowSettleUp] = useState(null);
@@ -64,7 +55,7 @@ export default function GroupPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [gData, mData, eData, tData, bData, aData, dData] = await Promise.all([
+      const [gData, mData, eData, tData, bData, aData, dData, pData] = await Promise.all([
         groupsApi.getGroup(groupId),
         groupsApi.getGroupMembers(groupId),
         expensesApi.getExpenses(groupId),
@@ -72,6 +63,7 @@ export default function GroupPage() {
         balancesApi.getGroupBalances(groupId),
         balancesApi.getGroupActivity(groupId, 30),
         balancesApi.getDetailedBalances(groupId),
+        paymentsApi.getPayments(groupId),
       ]);
       setGroup(gData.group);
       setMembers(mData.members);
@@ -80,6 +72,7 @@ export default function GroupPage() {
       setBalances(bData);
       setActivity(aData.activities);
       setDetailedBalances(dData);
+      setPayments(pData.payments);
     } catch (err) {
       showToast('Failed to load group', 'error');
     } finally {
@@ -91,6 +84,51 @@ export default function GroupPage() {
     setLoading(true);
     fetchAll();
   }, [fetchAll]);
+
+  // Deep links from notifications / activity items:
+  //   ?tab=<tab>       switch to that tab
+  //   ?expense=<id>    open that expense on the Expenses tab
+  //   ?payment=<id>    open that payment on the Balances tab
+  // Deleted expenses/payments are fetched separately and open with a Restore button.
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    const expenseId = searchParams.get('expense');
+    const paymentId = searchParams.get('payment');
+    if (!tab && !expenseId && !paymentId) return;
+    if ((expenseId || paymentId) && loading) return; // wait until data is loaded
+
+    // Clean up the URL params
+    searchParams.delete('tab');
+    searchParams.delete('expense');
+    searchParams.delete('payment');
+    setSearchParams(searchParams, { replace: true });
+
+    if (tab && validTabs.includes(tab)) setActiveTab(tab);
+
+    if (expenseId) {
+      setActiveTab('expenses');
+      const expense = expenses.find(e => String(e.id) === expenseId);
+      if (expense) {
+        setViewingExpense(expense);
+      } else {
+        expensesApi.getExpense(groupId, expenseId, { includeDeleted: true })
+          .then(d => setViewingExpense(d.expense))
+          .catch(() => showToast('That expense no longer exists', 'error'));
+      }
+    }
+
+    if (paymentId) {
+      setActiveTab('balances');
+      const payment = payments.find(p => String(p.id) === paymentId);
+      if (payment) {
+        setViewingPayment(payment);
+      } else {
+        paymentsApi.getPayment(groupId, paymentId, { includeDeleted: true })
+          .then(d => setViewingPayment(d.payment))
+          .catch(() => showToast('That payment no longer exists', 'error'));
+      }
+    }
+  }, [searchParams, loading, expenses, payments]);
 
   const handleAddExpense = async (data) => {
     setExpenseLoading(true);
@@ -125,7 +163,7 @@ export default function GroupPage() {
     if (!confirm('Delete this expense?')) return;
     try {
       await expensesApi.deleteExpense(groupId, expenseId);
-      showToast('Expense deleted', 'success');
+      showToast('Expense deleted', 'success', { label: 'Undo', onClick: () => handleRestoreExpense(expenseId) });
       setViewingExpense(null);
       fetchAll();
     } catch (err) {
@@ -133,9 +171,57 @@ export default function GroupPage() {
     }
   };
 
+  const handleRestoreExpense = async (expenseId) => {
+    try {
+      await expensesApi.restoreExpense(groupId, expenseId);
+      showToast('Expense restored', 'success');
+      setViewingExpense(null);
+      fetchAll();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to restore expense', 'error');
+    }
+  };
+
+  const handleUpdatePayment = async (paymentId, data) => {
+    try {
+      const { payment } = await paymentsApi.updatePayment(groupId, paymentId, data);
+      showToast('Payment updated', 'success');
+      setViewingPayment(payment);
+      fetchAll();
+      return true;
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to update payment', 'error');
+      return false;
+    }
+  };
+
+  const handleDeletePayment = async (paymentId) => {
+    if (!confirm('Delete this payment?')) return;
+    try {
+      await paymentsApi.deletePayment(groupId, paymentId);
+      showToast('Payment deleted', 'success', { label: 'Undo', onClick: () => handleRestorePayment(paymentId) });
+      setViewingPayment(null);
+      fetchAll();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete payment', 'error');
+    }
+  };
+
+  const handleRestorePayment = async (paymentId) => {
+    try {
+      await paymentsApi.restorePayment(groupId, paymentId);
+      showToast('Payment restored', 'success');
+      setViewingPayment(null);
+      fetchAll();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to restore payment', 'error');
+    }
+  };
+
   const handleSettleUp = async (amount) => {
     try {
       await paymentsApi.recordPayment(groupId, {
+        payer_id: showSettleUp.from_user,
         payee_id: showSettleUp.to_user,
         amount: amount,
         note: '',
@@ -188,26 +274,14 @@ export default function GroupPage() {
       showToast('Left group', 'success');
       navigate('/');
     } catch (err) {
-      showToast('Failed to leave group', 'error');
+      showToast(err.response?.data?.error || 'Failed to leave group', 'error');
     }
   };
 
-  // Helper: Check if a set of expenses is fully settled (all member nets ~= 0)
-  const isExpensesSettled = (expenseList) => {
-    if (!expenseList || expenseList.length === 0) return false;
-    const memberNets = {};
-    for (const exp of expenseList) {
-      if (!exp.payers || !exp.splits) continue;
-      for (const p of exp.payers) {
-        memberNets[p.user_id] = (memberNets[p.user_id] || 0) + p.amount;
-      }
-      for (const s of exp.splits) {
-        memberNets[s.user_id] = (memberNets[s.user_id] || 0) - s.amount;
-      }
-    }
-    // Check if all nets are effectively zero (within rounding tolerance)
-    return Object.values(memberNets).every(n => Math.abs(n) < 2);
-  };
+  // A set of expenses is settled once every one of them was covered by a
+  // full group settle-up (the server flags each expense with is_settled)
+  const isExpensesSettled = (expenseList) =>
+    Boolean(expenseList && expenseList.length > 0 && expenseList.every(e => e.is_settled));
 
   const inviteUrl = inviteLink ? `${window.location.origin}/invite/${inviteLink}` : '';
 
@@ -276,7 +350,7 @@ export default function GroupPage() {
                 </button>
               </div>
             ) : (
-              <ExpensesByTrip
+              <ExpensesByMonth
                 expenses={expenses}
                 trips={trips}
                 onView={setViewingExpense}
@@ -310,6 +384,7 @@ export default function GroupPage() {
               memberExpenses={balances?.memberExpenses}
               isSimplified={Boolean(group.simplify_debts)}
             />
+            <PaymentHistory payments={payments} userId={user.id} onView={setViewingPayment} />
           </div>
         )}
 
@@ -343,7 +418,7 @@ export default function GroupPage() {
             <NonTripAccordion
               expenses={nonTripExpenses}
               onView={setViewingExpense}
-              isExpensesSettled={isExpensesSettled}
+              allSettled={isExpensesSettled(nonTripExpenses)}
             />
 
             {/* Settled Trips */}
@@ -395,6 +470,21 @@ export default function GroupPage() {
               setEditingExpense(exp);
             }}
             onDelete={() => handleDeleteExpense(viewingExpense.id)}
+            onRestore={() => handleRestoreExpense(viewingExpense.id)}
+          />
+        )}
+      </Modal>
+
+      {/* Payment Detail Modal */}
+      <Modal isOpen={Boolean(viewingPayment)} onClose={() => setViewingPayment(null)} title="Payment Details" size="small">
+        {viewingPayment && (
+          <PaymentDetail
+            key={viewingPayment.id}
+            payment={viewingPayment}
+            members={members}
+            onSave={(data) => handleUpdatePayment(viewingPayment.id, data)}
+            onDelete={() => handleDeletePayment(viewingPayment.id)}
+            onRestore={() => handleRestorePayment(viewingPayment.id)}
           />
         )}
       </Modal>
@@ -429,6 +519,7 @@ export default function GroupPage() {
         {showSettleUp && (
           <SettleUpForm
             debt={showSettleUp}
+            userId={user.id}
             onSubmit={handleSettleUp}
             onCancel={() => setShowSettleUp(null)}
           />
@@ -450,7 +541,7 @@ export default function GroupPage() {
               showToast('Member removed', 'success');
               fetchAll();
             } catch (err) {
-              showToast('Failed to remove member', 'error');
+              showToast(err.response?.data?.error || 'Failed to remove member', 'error');
             }
           }}
           onAddPlaceholder={async (name) => {
@@ -499,17 +590,23 @@ export default function GroupPage() {
 }
 
 /* ─── Expense Detail View ─── */
-function ExpenseDetail({ expense, members, trips, onEdit, onDelete }) {
+function ExpenseDetail({ expense, members, trips, onEdit, onDelete, onRestore }) {
   const cat = getCategoryByKey(expense.category);
   const trip = trips.find(t => t.id === expense.trip_id);
   const splitType = SPLIT_TYPES.find(s => s.key === expense.split_type) || { label: 'Equal' };
 
   return (
     <div className={styles.expenseDetail}>
+      {Boolean(expense.is_deleted) && (
+        <div className={styles.deletedBanner}>This expense was deleted. Restore it to count it again.</div>
+      )}
       <div className={styles.detailHeader}>
         <span className={styles.detailCatIcon}>{cat.emoji}</span>
         <div>
-          <h3 className={styles.detailTitle}>{expense.description}</h3>
+          <h3 className={styles.detailTitle}>
+            {expense.description}
+            {expense.is_settled && <span className={styles.settledBadge}>Settled</span>}
+          </h3>
           <span className={styles.detailCategory}>{cat.label}</span>
         </div>
         <span className={styles.detailAmount}>{formatCurrency(expense.amount)}</span>
@@ -557,22 +654,158 @@ function ExpenseDetail({ expense, members, trips, onEdit, onDelete }) {
       </div>
 
       {/* Actions */}
+      {expense.is_deleted ? (
+        <div className={styles.detailActions}>
+          <button className={styles.detailEditBtn} onClick={onRestore}>Restore expense</button>
+        </div>
+      ) : (
+        <div className={styles.detailActions}>
+          <button className={styles.detailEditBtn} onClick={onEdit}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Edit
+          </button>
+          <button className={styles.detailDeleteBtn} onClick={onDelete}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Payment history (Balances tab) ─── */
+function PaymentHistory({ payments, userId, onView }) {
+  if (!payments || payments.length === 0) return null;
+  const nameOf = (id, name) => (id === userId ? 'You' : name);
+
+  return (
+    <div className={styles.paymentHistory}>
+      <h3 className={styles.paymentHistoryTitle}>Payment history</h3>
+      {payments.map(p => (
+        <div
+          key={p.id}
+          className={styles.expenseItem}
+          onClick={() => onView(p)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onView(p); }}
+        >
+          <span className={styles.expenseCat}>{'\uD83D\uDCB0'}</span>
+          <div className={styles.expenseInfo}>
+            <span className={styles.expenseDesc}>
+              {nameOf(p.payer_id, p.payer_name)} paid {nameOf(p.payee_id, p.payee_name)}
+            </span>
+            <span className={styles.expenseMeta}>
+              {formatDate(p.created_at)}{p.note ? ` \u00B7 ${p.note}` : ''}
+            </span>
+          </div>
+          <div className={styles.expenseRight}>
+            <span className={styles.expenseAmount}>{formatCurrency(p.amount)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Payment detail: view, edit, delete or restore ─── */
+function PaymentDetail({ payment, members, onSave, onDelete, onRestore }) {
+  const [editing, setEditing] = useState(false);
+  const [payerId, setPayerId] = useState(payment.payer_id);
+  const [payeeId, setPayeeId] = useState(payment.payee_id);
+  const [amount, setAmount] = useState(centsToDollars(payment.amount));
+  const [note, setNote] = useState(payment.note || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    const cents = Math.round(parseFloat(amount) * 100);
+    if (!(cents > 0)) return;
+    setSaving(true);
+    const ok = await onSave({ payer_id: Number(payerId), payee_id: Number(payeeId), amount: cents, note });
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <form onSubmit={handleSave}>
+        <div style={{ marginBottom: 12 }}>
+          <label className={styles.formLabel}>Who paid</label>
+          <select className={styles.formInput} value={payerId} onChange={e => setPayerId(e.target.value)}>
+            {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label className={styles.formLabel}>Paid to</label>
+          <select className={styles.formInput} value={payeeId} onChange={e => setPayeeId(e.target.value)}>
+            {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label className={styles.formLabel}>Amount ($)</label>
+          <input className={styles.formInput} type="number" step="0.01" min="0.01"
+            value={amount} onChange={e => setAmount(e.target.value)} />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label className={styles.formLabel}>Note</label>
+          <input className={styles.formInput} type="text" maxLength={200}
+            value={note} onChange={e => setNote(e.target.value)} placeholder="Optional" />
+        </div>
+        <div className={styles.detailActions}>
+          <button type="button" className={styles.detailDeleteBtn} onClick={() => setEditing(false)}>Cancel</button>
+          <button type="submit" className={styles.detailEditBtn} disabled={saving || String(payerId) === String(payeeId)}>
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className={styles.expenseDetail}>
+      {Boolean(payment.is_deleted) && (
+        <div className={styles.deletedBanner}>This payment was deleted. Restore it to count it again.</div>
+      )}
+      <div className={styles.detailHeader}>
+        <span className={styles.detailCatIcon}>{'\uD83D\uDCB0'}</span>
+        <div>
+          <h3 className={styles.detailTitle}>{payment.payer_name} paid {payment.payee_name}</h3>
+          <span className={styles.detailCategory}>{formatDate(payment.created_at)}</span>
+        </div>
+        <span className={styles.detailAmount}>{formatCurrency(payment.amount)}</span>
+      </div>
+      <div className={styles.detailMeta}>
+        {payment.note && (
+          <div className={styles.detailRow}>
+            <span className={styles.detailLabel}>Note</span>
+            <span>{payment.note}</span>
+          </div>
+        )}
+        {payment.recorded_by_name && (
+          <div className={styles.detailRow}>
+            <span className={styles.detailLabel}>Recorded by</span>
+            <span>{payment.recorded_by_name}</span>
+          </div>
+        )}
+      </div>
       <div className={styles.detailActions}>
-        <button className={styles.detailEditBtn} onClick={onEdit}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          Edit
-        </button>
-        <button className={styles.detailDeleteBtn} onClick={onDelete}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-          Delete
-        </button>
+        {payment.is_deleted ? (
+          <button className={styles.detailEditBtn} onClick={onRestore}>Restore payment</button>
+        ) : (
+          <>
+            <button className={styles.detailEditBtn} onClick={() => setEditing(true)}>Edit</button>
+            <button className={styles.detailDeleteBtn} onClick={onDelete}>Delete</button>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 /* ─── Non-Trip Expenses Accordion (grouped by month) ─── */
-function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
+function NonTripAccordion({ expenses, onView, allSettled }) {
   const [expanded, setExpanded] = useState(false);
 
   if (!expenses || expenses.length === 0) return null;
@@ -580,8 +813,7 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
   // Group expenses by month
   const monthGroups = {};
   for (const exp of expenses) {
-    const d = exp.date ? new Date(String(exp.date).split('T')[0]) : null;
-    const key = d && !isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'Unknown';
+    const key = monthKeyOf(exp.date);
     if (!monthGroups[key]) monthGroups[key] = [];
     monthGroups[key].push(exp);
   }
@@ -590,16 +822,6 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
   const sortedMonths = Object.keys(monthGroups).sort((a, b) => b.localeCompare(a));
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
-
-  // Check which individual expenses are settled
-  // We determine "settled" per expense: if all member nets for that expense are zero
-  const isOneExpenseSettled = (exp) => {
-    if (!exp.payers || !exp.splits) return false;
-    return isExpensesSettled([exp]);
-  };
-
-  // Is the entire non-trip section settled?
-  const allSettled = isExpensesSettled(expenses);
 
   return (
     <div className={`${styles.tripAccordion} ${allSettled ? styles.settledAccordion : ''}`}>
@@ -630,13 +852,7 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
           {sortedMonths.map(monthKey => {
             const monthExps = monthGroups[monthKey];
             const monthTotal = monthExps.reduce((s, e) => s + e.amount, 0);
-            // Format month header
-            let monthLabel = monthKey;
-            if (monthKey !== 'Unknown') {
-              const [y, m] = monthKey.split('-');
-              const d = new Date(Number(y), Number(m) - 1);
-              monthLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-            }
+            const monthLabel = monthLabelOf(monthKey);
 
             return (
               <div key={monthKey} className={styles.monthGroup}>
@@ -649,7 +865,7 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
                     key={expense.id}
                     expense={expense}
                     onView={onView}
-                    settled={isOneExpenseSettled(expense)}
+                    settled={expense.is_settled}
                   />
                 ))}
               </div>
@@ -662,7 +878,7 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
 }
 
 /* ─── Settle Up Form ─── */
-function SettleUpForm({ debt, onSubmit, onCancel }) {
+function SettleUpForm({ debt, userId, onSubmit, onCancel }) {
   const [amount, setAmount] = useState(centsToDollars(debt.amount));
 
   const handleSubmit = (e) => {
@@ -674,7 +890,13 @@ function SettleUpForm({ debt, onSubmit, onCancel }) {
   return (
     <form onSubmit={handleSubmit}>
       <p style={{ marginBottom: 16, fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-        You owe <strong>{debt.to_user_name}</strong>
+        {debt.from_user === userId ? (
+          <>You pay <strong>{debt.to_user_name}</strong></>
+        ) : debt.to_user === userId ? (
+          <><strong>{debt.from_user_name}</strong> pays you</>
+        ) : (
+          <><strong>{debt.from_user_name}</strong> pays <strong>{debt.to_user_name}</strong></>
+        )}
       </p>
       <div style={{ marginBottom: 16 }}>
         <label className={styles.formLabel}>Amount ($)</label>
@@ -883,7 +1105,7 @@ function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, sett
             </div>
           ) : (
             tripExpenses.map(expense => (
-              <ExpenseRow key={expense.id} expense={expense} onView={onView} settled={settled} />
+              <ExpenseRow key={expense.id} expense={expense} onView={onView} settled={expense.is_settled} />
             ))
           )}
         </div>
@@ -892,65 +1114,56 @@ function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, sett
   );
 }
 
-function ExpensesByTrip({ expenses, trips, onView }) {
-  // Group expenses by trip
-  const tripMap = {};
-  for (const t of trips) {
-    tripMap[t.id] = t.name;
-  }
-
-  const grouped = {};
-  for (const expense of expenses) {
-    const key = expense.trip_id || '__none__';
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(expense);
-  }
-
-  // Order: trips first (by name), then ungrouped at the end
-  const tripKeys = Object.keys(grouped).filter(k => k !== '__none__').sort((a, b) => {
-    const nameA = tripMap[a] || '';
-    const nameB = tripMap[b] || '';
-    return nameA.localeCompare(nameB);
-  });
-  const orderedKeys = [...tripKeys];
-  if (grouped.__none__) orderedKeys.push('__none__');
-
-  // If no trips at all, just show flat list
-  if (orderedKeys.length === 1 && orderedKeys[0] === '__none__') {
-    return grouped.__none__.map(expense => (
-      <ExpenseRow key={expense.id} expense={expense} onView={onView} />
-    ));
-  }
-
-  return orderedKeys.map(key => {
-    const exps = grouped[key];
-    const tripName = key === '__none__' ? 'General (no trip)' : tripMap[key] || 'Trip';
-    const tripTotal = exps.reduce((sum, e) => sum + e.amount, 0);
-
-    return (
-      <div key={key} className={styles.tripGroup}>
-        <div className={styles.tripGroupHeader}>
-          <div className={styles.tripGroupTitle}>
-            {key !== '__none__' && (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/>
-              </svg>
-            )}
-            <span>{tripName}</span>
-          </div>
-          <span className={styles.tripGroupTotal}>
-            {exps.length} expense{exps.length !== 1 ? 's' : ''} &middot; {formatCurrency(tripTotal)}
-          </span>
-        </div>
-        {exps.map(expense => (
-          <ExpenseRow key={expense.id} expense={expense} onView={onView} />
-        ))}
-      </div>
-    );
-  });
+function monthKeyOf(dateStr) {
+  const d = dateStr ? new Date(String(dateStr).split('T')[0]) : null;
+  return d && !isNaN(d) ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}` : 'Unknown';
 }
 
-function ExpenseRow({ expense, onView, settled }) {
+function monthLabelOf(monthKey) {
+  if (monthKey === 'Unknown') return monthKey;
+  const [y, m] = monthKey.split('-');
+  return new Date(Number(y), Number(m) - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+/* ─── All expenses, latest to oldest, under month headers ─── */
+function ExpensesByMonth({ expenses, trips, onView }) {
+  const tripMap = {};
+  for (const t of trips) tripMap[t.id] = t.name;
+
+  // Expenses arrive sorted latest-first from the server; keep that order
+  const months = [];
+  const byMonth = {};
+  for (const expense of expenses) {
+    const key = monthKeyOf(expense.date);
+    if (!byMonth[key]) {
+      byMonth[key] = [];
+      months.push(key);
+    }
+    byMonth[key].push(expense);
+  }
+
+  return months.map(key => (
+    <div key={key} className={styles.monthGroup}>
+      <div className={styles.monthHeader}>
+        <span>{monthLabelOf(key)}</span>
+        <span className={styles.monthTotal}>
+          {formatCurrency(byMonth[key].reduce((s, e) => s + e.amount, 0))}
+        </span>
+      </div>
+      {byMonth[key].map(expense => (
+        <ExpenseRow
+          key={expense.id}
+          expense={expense}
+          onView={onView}
+          settled={expense.is_settled}
+          tripName={tripMap[expense.trip_id]}
+        />
+      ))}
+    </div>
+  ));
+}
+
+function ExpenseRow({ expense, onView, settled, tripName }) {
   const cat = getCategoryByKey(expense.category);
   return (
     <div
@@ -965,10 +1178,12 @@ function ExpenseRow({ expense, onView, settled }) {
         <span className={styles.expenseDesc}>{expense.description}</span>
         <span className={styles.expenseMeta}>
           {formatDate(expense.date)} &middot; Paid by {expense.payers.map(p => p.user_name).join(', ')}
+          {tripName && <> &middot; {tripName}</>}
         </span>
       </div>
       <div className={styles.expenseRight}>
         <span className={styles.expenseAmount}>{formatCurrency(expense.amount)}</span>
+        {settled && <span className={styles.settledLabel}>settled</span>}
       </div>
     </div>
   );

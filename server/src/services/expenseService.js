@@ -2,10 +2,39 @@ const db = require('../db/connection');
 const { NotFoundError, ValidationError } = require('../utils/errors');
 const { calculateSplit } = require('../utils/splitCalculator');
 const activityService = require('./activityService');
+const { getSettlementState, loadMembers } = require('./balanceService');
 const notificationService = require('./notificationService');
+
+/**
+ * Make sure everyone on the expense belongs to the group and the trip (if any)
+ * is one of the group's trips. `alsoAllowed` lets an edit keep people who were
+ * already on the expense even if they have since left the group.
+ */
+function validateParticipants(groupId, { trip_id, payers, splits }, alsoAllowed = []) {
+  const allowed = new Set([...loadMembers(groupId).map(m => m.id), ...alsoAllowed]);
+
+  for (const [label, list] of [['payer', payers], ['split', splits]]) {
+    const seen = new Set();
+    for (const { user_id } of list) {
+      if (!allowed.has(user_id)) {
+        throw new ValidationError(`Every ${label} must be a member of this group`);
+      }
+      if (seen.has(user_id)) {
+        throw new ValidationError(`The same person is listed twice as a ${label}`);
+      }
+      seen.add(user_id);
+    }
+  }
+
+  if (trip_id !== null && trip_id !== undefined) {
+    const trip = db.prepare('SELECT id FROM trips WHERE id = ? AND group_id = ?').get(trip_id, groupId);
+    if (!trip) throw new ValidationError('Trip not found in this group');
+  }
+}
 
 function createExpense(groupId, data, userId) {
   const { description, amount, category, split_type, date, trip_id, payers, splits } = data;
+  validateParticipants(groupId, data);
 
   // Validate payers sum equals total
   const payerSum = payers.reduce((s, p) => s + p.amount, 0);
@@ -85,25 +114,32 @@ function getGroupExpenses(groupId, tripId = null) {
     }
   }
 
-  query += ' ORDER BY e.date DESC, e.created_at DESC';
+  // Latest first: by expense date, then by when it was recorded
+  query += ' ORDER BY date(e.date) DESC, e.created_at DESC, e.id DESC';
 
   const expenses = db.prepare(query).all(...params);
+  const { settledExpenseIds } = getSettlementState(groupId);
 
   // Fetch payers and splits for each expense
-  return expenses.map(e => enrichExpense(e));
+  return expenses.map(e => ({ ...enrichExpense(e), is_settled: settledExpenseIds.has(e.id) }));
 }
 
-function getExpenseById(expenseId) {
+function getExpenseById(expenseId, groupId, { includeDeleted = false } = {}) {
   const expense = db.prepare(`
     SELECT e.*, u.name as created_by_name
     FROM expenses e
     JOIN users u ON u.id = e.created_by
-    WHERE e.id = ? AND e.is_deleted = 0
-  `).get(expenseId);
+    WHERE e.id = ? AND (e.is_deleted = 0 OR ?)
+  `).get(expenseId, includeDeleted ? 1 : 0);
 
-  if (!expense) throw new NotFoundError('Expense not found');
+  // Scope to the group the caller has access to, so a member of one group
+  // can't read or modify another group's expenses by guessing IDs.
+  if (!expense || (groupId !== undefined && expense.group_id !== Number(groupId))) {
+    throw new NotFoundError('Expense not found');
+  }
 
-  return enrichExpense(expense);
+  const { settledExpenseIds } = getSettlementState(expense.group_id);
+  return { ...enrichExpense(expense), is_settled: settledExpenseIds.has(expense.id) };
 }
 
 function enrichExpense(expense) {
@@ -131,9 +167,13 @@ function enrichExpense(expense) {
   return { ...expense, payers, splits };
 }
 
-function updateExpense(expenseId, data, userId) {
-  const oldExpense = getExpenseById(expenseId);
+function updateExpense(expenseId, data, userId, groupId) {
+  const oldExpense = getExpenseById(expenseId, groupId);
   const { description, amount, category, split_type, date, trip_id, payers, splits } = data;
+  validateParticipants(oldExpense.group_id, data, [
+    ...oldExpense.payers.map(p => p.user_id),
+    ...oldExpense.splits.map(s => s.user_id),
+  ]);
 
   // Validate payers sum
   const payerSum = payers.reduce((s, p) => s + p.amount, 0);
@@ -189,8 +229,8 @@ function updateExpense(expenseId, data, userId) {
   return getExpenseById(expenseId);
 }
 
-function deleteExpense(expenseId, userId) {
-  const expense = getExpenseById(expenseId);
+function deleteExpense(expenseId, userId, groupId) {
+  const expense = getExpenseById(expenseId, groupId);
   const user = db.prepare('SELECT name FROM users WHERE id = ?').get(userId);
 
   db.transaction(() => {
@@ -215,10 +255,51 @@ function deleteExpense(expenseId, userId) {
   return expense;
 }
 
+/**
+ * Undo a delete. Everyone on the expense must still be in the group, otherwise
+ * restoring would create a debt for someone who has already left.
+ */
+function restoreExpense(expenseId, userId, groupId) {
+  const expense = getExpenseById(expenseId, groupId, { includeDeleted: true });
+  if (!expense.is_deleted) throw new ValidationError('Expense is not deleted');
+
+  const members = new Set(loadMembers(expense.group_id).map(m => m.id));
+  const missing = [...expense.payers, ...expense.splits].find(p => !members.has(p.user_id));
+  if (missing) {
+    throw new ValidationError(
+      `Can't restore: ${missing.user_name || 'someone on this expense'} is no longer in the group`
+    );
+  }
+
+  const user = db.prepare('SELECT name FROM users WHERE id = ?').get(userId);
+
+  db.transaction(() => {
+    db.prepare("UPDATE expenses SET is_deleted = 0, updated_at = datetime('now') WHERE id = ?").run(expenseId);
+
+    activityService.logActivity(expense.group_id, userId, 'expense_restored', 'expense', expense.id, {
+      description: expense.description,
+      amount: expense.amount,
+    });
+
+    const formattedAmount = (expense.amount / 100).toFixed(2);
+    notificationService.notifyGroupMembers(
+      'expense_restored',
+      expense.group_id,
+      userId,
+      'expense',
+      expense.id,
+      `${user.name} restored "${expense.description}" ($${formattedAmount})`
+    );
+  })();
+
+  return getExpenseById(expenseId, groupId);
+}
+
 module.exports = {
   createExpense,
   getGroupExpenses,
   getExpenseById,
   updateExpense,
   deleteExpense,
+  restoreExpense,
 };

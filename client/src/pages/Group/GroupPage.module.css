@@ -363,40 +363,6 @@
   font-size: var(--font-size-sm);
 }
 
-/* Trip-grouped expenses */
-.tripGroup {
-  margin-bottom: var(--space-lg);
-}
-
-.tripGroup:last-child {
-  margin-bottom: 0;
-}
-
-.tripGroupHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-sm);
-}
-
-.tripGroupTitle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-semibold);
-  color: var(--color-text);
-}
-
-.tripGroupTotal {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-  white-space: nowrap;
-}
-
 /* Empty state */
 .empty {
   text-align: center;
@@ -453,7 +419,20 @@
 }
 
 .settledExpense {
-  opacity: 0.5;
+  opacity: 0.55;
+}
+
+.settledExpense .expenseDesc,
+.settledExpense .expenseAmount {
+  text-decoration: line-through;
+}
+
+.settledLabel {
+  display: block;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .settledBadge {
@@ -690,4 +669,27 @@
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ─── Deleted items & payment history ─── */
+.deletedBanner {
+  background: var(--color-danger-light, #fdecea);
+  color: var(--color-danger);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-md);
+}
+
+.paymentHistory {
+  margin-top: var(--space-xl, 32px);
+}
+
+.paymentHistoryTitle {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-sm);
 }

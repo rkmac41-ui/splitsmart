@@ -3,6 +3,11 @@ const { v4: uuidv4 } = require('uuid');
 const { NotFoundError, ForbiddenError, ConflictError } = require('../utils/errors');
 const activityService = require('./activityService');
 const notificationService = require('./notificationService');
+const { computeGroupBalances } = require('./balanceService');
+
+function formatCents(cents) {
+  return `$${(Math.abs(cents) / 100).toFixed(2)}`;
+}
 
 function createGroup(name, userId) {
   const create = db.transaction(() => {
@@ -113,6 +118,18 @@ function removeMember(groupId, targetUserId, requestorId) {
   if (!target) throw new NotFoundError('Member not found in group');
 
   const targetUser = db.prepare('SELECT name FROM users WHERE id = ?').get(targetUserId);
+
+  // Don't let anyone leave (or be removed) while money is still owed either way,
+  // otherwise their debts would be orphaned
+  const { memberBalances } = computeGroupBalances(Number(groupId));
+  const balance = memberBalances.find(mb => mb.user_id === targetUserId)?.balance || 0;
+  if (balance !== 0) {
+    const who = targetUserId === requestorId ? 'You' : targetUser.name;
+    const detail = balance < 0
+      ? `${who === 'You' ? 'still owe' : 'still owes'} ${formatCents(balance)}`
+      : `${who === 'You' ? 'are' : 'is'} still owed ${formatCents(balance)}`;
+    throw new ConflictError(`${who} ${detail} in this group. Settle up first.`);
+  }
 
   db.transaction(() => {
     db.prepare(
@@ -282,6 +299,14 @@ function removePlaceholderMember(groupId, placeholderId) {
     throw new ConflictError('Cannot remove placeholder with assigned expenses');
   }
 
+  const hasPayments = db.prepare(
+    'SELECT 1 FROM payments WHERE group_id = ? AND (payer_id = ? OR payee_id = ?)'
+  ).get(groupId, negId, negId);
+
+  if (hasPayments) {
+    throw new ConflictError('Cannot remove placeholder with recorded payments');
+  }
+
   db.prepare('DELETE FROM placeholder_members WHERE id = ?').run(placeholderId);
   return ph;
 }
@@ -306,15 +331,31 @@ function claimPlaceholder(groupId, placeholderId, userId) {
       "UPDATE placeholder_members SET claimed_by = ?, claimed_at = datetime('now') WHERE id = ?"
     ).run(userId, placeholderId);
 
-    // Transfer expense_payers records from placeholder (-id) to real user
-    db.prepare('UPDATE expense_payers SET user_id = ? WHERE user_id = ?').run(userId, negId);
+    // Transfer expense_payers / expense_splits records from placeholder (-id)
+    // to the real user. If the user was already on the same expense, fold the
+    // placeholder's amount into their row (a person can only appear once).
+    for (const table of ['expense_payers', 'expense_splits']) {
+      const shareCol = table === 'expense_splits'
+        ? ', share_value = CASE WHEN share_value IS NULL THEN NULL ELSE share_value + COALESCE((SELECT ph.share_value FROM expense_splits ph WHERE ph.expense_id = expense_splits.expense_id AND ph.user_id = ?), 0) END'
+        : '';
+      const shareArgs = table === 'expense_splits' ? [negId] : [];
+      db.prepare(`
+        UPDATE ${table}
+        SET amount = amount + (SELECT ph.amount FROM ${table} ph WHERE ph.expense_id = ${table}.expense_id AND ph.user_id = ?)${shareCol}
+        WHERE user_id = ? AND expense_id IN (SELECT expense_id FROM ${table} WHERE user_id = ?)
+      `).run(negId, ...shareArgs, userId, negId);
+      db.prepare(`
+        DELETE FROM ${table}
+        WHERE user_id = ? AND expense_id IN (SELECT expense_id FROM ${table} WHERE user_id = ?)
+      `).run(negId, userId);
+      db.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id = ?`).run(userId, negId);
+    }
 
-    // Transfer expense_splits records from placeholder (-id) to real user
-    db.prepare('UPDATE expense_splits SET user_id = ? WHERE user_id = ?').run(userId, negId);
-
-    // Transfer any payment records
+    // Transfer any payment records; payments between the user and their own
+    // placeholder become self-payments, which mean nothing, so drop them
     db.prepare('UPDATE payments SET payer_id = ? WHERE payer_id = ?').run(userId, negId);
     db.prepare('UPDATE payments SET payee_id = ? WHERE payee_id = ?').run(userId, negId);
+    db.prepare('DELETE FROM payments WHERE group_id = ? AND payer_id = payee_id').run(groupId);
 
     // Log activity
     activityService.logActivity(groupId, userId, 'placeholder_claimed', 'placeholder', placeholderId, {
