@@ -38,17 +38,6 @@ export default function GroupPage() {
     validTabs.includes(tabFromUrl) ? tabFromUrl : 'trips'
   );
 
-  // Sync tab from URL param (e.g. when clicking a notification)
-  useEffect(() => {
-    const tab = searchParams.get('tab');
-    if (tab && validTabs.includes(tab) && tab !== activeTab) {
-      setActiveTab(tab);
-      // Clean up the URL param
-      searchParams.delete('tab');
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, [searchParams]);
-
   // Modals
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
@@ -91,6 +80,32 @@ export default function GroupPage() {
     setLoading(true);
     fetchAll();
   }, [fetchAll]);
+
+  // Deep links from notifications / activity items:
+  //   ?tab=<tab>       switch to that tab
+  //   ?expense=<id>    open that expense on the Expenses tab
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    const expenseId = searchParams.get('expense');
+    if (!tab && !expenseId) return;
+    if (expenseId && loading) return; // wait until expenses are loaded
+
+    if (tab && validTabs.includes(tab)) setActiveTab(tab);
+    if (expenseId) {
+      const expense = expenses.find(e => String(e.id) === expenseId);
+      if (expense) {
+        setActiveTab('expenses');
+        setViewingExpense(expense);
+      } else {
+        showToast('That expense has been deleted', 'error');
+      }
+    }
+
+    // Clean up the URL params
+    searchParams.delete('tab');
+    searchParams.delete('expense');
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, loading, expenses]);
 
   const handleAddExpense = async (data) => {
     setExpenseLoading(true);
@@ -192,22 +207,10 @@ export default function GroupPage() {
     }
   };
 
-  // Helper: Check if a set of expenses is fully settled (all member nets ~= 0)
-  const isExpensesSettled = (expenseList) => {
-    if (!expenseList || expenseList.length === 0) return false;
-    const memberNets = {};
-    for (const exp of expenseList) {
-      if (!exp.payers || !exp.splits) continue;
-      for (const p of exp.payers) {
-        memberNets[p.user_id] = (memberNets[p.user_id] || 0) + p.amount;
-      }
-      for (const s of exp.splits) {
-        memberNets[s.user_id] = (memberNets[s.user_id] || 0) - s.amount;
-      }
-    }
-    // Check if all nets are effectively zero (within rounding tolerance)
-    return Object.values(memberNets).every(n => Math.abs(n) < 2);
-  };
+  // A set of expenses is settled once every one of them was covered by a
+  // full group settle-up (the server flags each expense with is_settled)
+  const isExpensesSettled = (expenseList) =>
+    Boolean(expenseList && expenseList.length > 0 && expenseList.every(e => e.is_settled));
 
   const inviteUrl = inviteLink ? `${window.location.origin}/invite/${inviteLink}` : '';
 
@@ -276,7 +279,7 @@ export default function GroupPage() {
                 </button>
               </div>
             ) : (
-              <ExpensesByTrip
+              <ExpensesByMonth
                 expenses={expenses}
                 trips={trips}
                 onView={setViewingExpense}
@@ -343,7 +346,7 @@ export default function GroupPage() {
             <NonTripAccordion
               expenses={nonTripExpenses}
               onView={setViewingExpense}
-              isExpensesSettled={isExpensesSettled}
+              allSettled={isExpensesSettled(nonTripExpenses)}
             />
 
             {/* Settled Trips */}
@@ -509,7 +512,10 @@ function ExpenseDetail({ expense, members, trips, onEdit, onDelete }) {
       <div className={styles.detailHeader}>
         <span className={styles.detailCatIcon}>{cat.emoji}</span>
         <div>
-          <h3 className={styles.detailTitle}>{expense.description}</h3>
+          <h3 className={styles.detailTitle}>
+            {expense.description}
+            {expense.is_settled && <span className={styles.settledBadge}>Settled</span>}
+          </h3>
           <span className={styles.detailCategory}>{cat.label}</span>
         </div>
         <span className={styles.detailAmount}>{formatCurrency(expense.amount)}</span>
@@ -572,7 +578,7 @@ function ExpenseDetail({ expense, members, trips, onEdit, onDelete }) {
 }
 
 /* ─── Non-Trip Expenses Accordion (grouped by month) ─── */
-function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
+function NonTripAccordion({ expenses, onView, allSettled }) {
   const [expanded, setExpanded] = useState(false);
 
   if (!expenses || expenses.length === 0) return null;
@@ -580,8 +586,7 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
   // Group expenses by month
   const monthGroups = {};
   for (const exp of expenses) {
-    const d = exp.date ? new Date(String(exp.date).split('T')[0]) : null;
-    const key = d && !isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'Unknown';
+    const key = monthKeyOf(exp.date);
     if (!monthGroups[key]) monthGroups[key] = [];
     monthGroups[key].push(exp);
   }
@@ -590,16 +595,6 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
   const sortedMonths = Object.keys(monthGroups).sort((a, b) => b.localeCompare(a));
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
-
-  // Check which individual expenses are settled
-  // We determine "settled" per expense: if all member nets for that expense are zero
-  const isOneExpenseSettled = (exp) => {
-    if (!exp.payers || !exp.splits) return false;
-    return isExpensesSettled([exp]);
-  };
-
-  // Is the entire non-trip section settled?
-  const allSettled = isExpensesSettled(expenses);
 
   return (
     <div className={`${styles.tripAccordion} ${allSettled ? styles.settledAccordion : ''}`}>
@@ -630,13 +625,7 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
           {sortedMonths.map(monthKey => {
             const monthExps = monthGroups[monthKey];
             const monthTotal = monthExps.reduce((s, e) => s + e.amount, 0);
-            // Format month header
-            let monthLabel = monthKey;
-            if (monthKey !== 'Unknown') {
-              const [y, m] = monthKey.split('-');
-              const d = new Date(Number(y), Number(m) - 1);
-              monthLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-            }
+            const monthLabel = monthLabelOf(monthKey);
 
             return (
               <div key={monthKey} className={styles.monthGroup}>
@@ -649,7 +638,7 @@ function NonTripAccordion({ expenses, onView, isExpensesSettled }) {
                     key={expense.id}
                     expense={expense}
                     onView={onView}
-                    settled={isOneExpenseSettled(expense)}
+                    settled={expense.is_settled}
                   />
                 ))}
               </div>
@@ -883,7 +872,7 @@ function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, sett
             </div>
           ) : (
             tripExpenses.map(expense => (
-              <ExpenseRow key={expense.id} expense={expense} onView={onView} settled={settled} />
+              <ExpenseRow key={expense.id} expense={expense} onView={onView} settled={expense.is_settled} />
             ))
           )}
         </div>
@@ -892,65 +881,56 @@ function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, sett
   );
 }
 
-function ExpensesByTrip({ expenses, trips, onView }) {
-  // Group expenses by trip
-  const tripMap = {};
-  for (const t of trips) {
-    tripMap[t.id] = t.name;
-  }
-
-  const grouped = {};
-  for (const expense of expenses) {
-    const key = expense.trip_id || '__none__';
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(expense);
-  }
-
-  // Order: trips first (by name), then ungrouped at the end
-  const tripKeys = Object.keys(grouped).filter(k => k !== '__none__').sort((a, b) => {
-    const nameA = tripMap[a] || '';
-    const nameB = tripMap[b] || '';
-    return nameA.localeCompare(nameB);
-  });
-  const orderedKeys = [...tripKeys];
-  if (grouped.__none__) orderedKeys.push('__none__');
-
-  // If no trips at all, just show flat list
-  if (orderedKeys.length === 1 && orderedKeys[0] === '__none__') {
-    return grouped.__none__.map(expense => (
-      <ExpenseRow key={expense.id} expense={expense} onView={onView} />
-    ));
-  }
-
-  return orderedKeys.map(key => {
-    const exps = grouped[key];
-    const tripName = key === '__none__' ? 'General (no trip)' : tripMap[key] || 'Trip';
-    const tripTotal = exps.reduce((sum, e) => sum + e.amount, 0);
-
-    return (
-      <div key={key} className={styles.tripGroup}>
-        <div className={styles.tripGroupHeader}>
-          <div className={styles.tripGroupTitle}>
-            {key !== '__none__' && (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/>
-              </svg>
-            )}
-            <span>{tripName}</span>
-          </div>
-          <span className={styles.tripGroupTotal}>
-            {exps.length} expense{exps.length !== 1 ? 's' : ''} &middot; {formatCurrency(tripTotal)}
-          </span>
-        </div>
-        {exps.map(expense => (
-          <ExpenseRow key={expense.id} expense={expense} onView={onView} />
-        ))}
-      </div>
-    );
-  });
+function monthKeyOf(dateStr) {
+  const d = dateStr ? new Date(String(dateStr).split('T')[0]) : null;
+  return d && !isNaN(d) ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}` : 'Unknown';
 }
 
-function ExpenseRow({ expense, onView, settled }) {
+function monthLabelOf(monthKey) {
+  if (monthKey === 'Unknown') return monthKey;
+  const [y, m] = monthKey.split('-');
+  return new Date(Number(y), Number(m) - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+/* ─── All expenses, latest to oldest, under month headers ─── */
+function ExpensesByMonth({ expenses, trips, onView }) {
+  const tripMap = {};
+  for (const t of trips) tripMap[t.id] = t.name;
+
+  // Expenses arrive sorted latest-first from the server; keep that order
+  const months = [];
+  const byMonth = {};
+  for (const expense of expenses) {
+    const key = monthKeyOf(expense.date);
+    if (!byMonth[key]) {
+      byMonth[key] = [];
+      months.push(key);
+    }
+    byMonth[key].push(expense);
+  }
+
+  return months.map(key => (
+    <div key={key} className={styles.monthGroup}>
+      <div className={styles.monthHeader}>
+        <span>{monthLabelOf(key)}</span>
+        <span className={styles.monthTotal}>
+          {formatCurrency(byMonth[key].reduce((s, e) => s + e.amount, 0))}
+        </span>
+      </div>
+      {byMonth[key].map(expense => (
+        <ExpenseRow
+          key={expense.id}
+          expense={expense}
+          onView={onView}
+          settled={expense.is_settled}
+          tripName={tripMap[expense.trip_id]}
+        />
+      ))}
+    </div>
+  ));
+}
+
+function ExpenseRow({ expense, onView, settled, tripName }) {
   const cat = getCategoryByKey(expense.category);
   return (
     <div
@@ -965,10 +945,12 @@ function ExpenseRow({ expense, onView, settled }) {
         <span className={styles.expenseDesc}>{expense.description}</span>
         <span className={styles.expenseMeta}>
           {formatDate(expense.date)} &middot; Paid by {expense.payers.map(p => p.user_name).join(', ')}
+          {tripName && <> &middot; {tripName}</>}
         </span>
       </div>
       <div className={styles.expenseRight}>
         <span className={styles.expenseAmount}>{formatCurrency(expense.amount)}</span>
+        {settled && <span className={styles.settledLabel}>settled</span>}
       </div>
     </div>
   );

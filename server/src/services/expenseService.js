@@ -2,6 +2,7 @@ const db = require('../db/connection');
 const { NotFoundError, ValidationError } = require('../utils/errors');
 const { calculateSplit } = require('../utils/splitCalculator');
 const activityService = require('./activityService');
+const { getSettlementState } = require('./balanceService');
 const notificationService = require('./notificationService');
 
 function createExpense(groupId, data, userId) {
@@ -85,15 +86,17 @@ function getGroupExpenses(groupId, tripId = null) {
     }
   }
 
-  query += ' ORDER BY e.date DESC, e.created_at DESC';
+  // Latest first: by expense date, then by when it was recorded
+  query += ' ORDER BY date(e.date) DESC, e.created_at DESC, e.id DESC';
 
   const expenses = db.prepare(query).all(...params);
+  const { settledExpenseIds } = getSettlementState(groupId);
 
   // Fetch payers and splits for each expense
-  return expenses.map(e => enrichExpense(e));
+  return expenses.map(e => ({ ...enrichExpense(e), is_settled: settledExpenseIds.has(e.id) }));
 }
 
-function getExpenseById(expenseId) {
+function getExpenseById(expenseId, groupId) {
   const expense = db.prepare(`
     SELECT e.*, u.name as created_by_name
     FROM expenses e
@@ -101,9 +104,14 @@ function getExpenseById(expenseId) {
     WHERE e.id = ? AND e.is_deleted = 0
   `).get(expenseId);
 
-  if (!expense) throw new NotFoundError('Expense not found');
+  // Scope to the group the caller has access to, so a member of one group
+  // can't read or modify another group's expenses by guessing IDs.
+  if (!expense || (groupId !== undefined && expense.group_id !== Number(groupId))) {
+    throw new NotFoundError('Expense not found');
+  }
 
-  return enrichExpense(expense);
+  const { settledExpenseIds } = getSettlementState(expense.group_id);
+  return { ...enrichExpense(expense), is_settled: settledExpenseIds.has(expense.id) };
 }
 
 function enrichExpense(expense) {
@@ -131,8 +139,8 @@ function enrichExpense(expense) {
   return { ...expense, payers, splits };
 }
 
-function updateExpense(expenseId, data, userId) {
-  const oldExpense = getExpenseById(expenseId);
+function updateExpense(expenseId, data, userId, groupId) {
+  const oldExpense = getExpenseById(expenseId, groupId);
   const { description, amount, category, split_type, date, trip_id, payers, splits } = data;
 
   // Validate payers sum
@@ -189,8 +197,8 @@ function updateExpense(expenseId, data, userId) {
   return getExpenseById(expenseId);
 }
 
-function deleteExpense(expenseId, userId) {
-  const expense = getExpenseById(expenseId);
+function deleteExpense(expenseId, userId, groupId) {
+  const expense = getExpenseById(expenseId, groupId);
   const user = db.prepare('SELECT name FROM users WHERE id = ?').get(userId);
 
   db.transaction(() => {

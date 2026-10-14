@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { formatRelativeTime, formatCurrency } from '../../utils/formatters';
 import styles from './ActivityFeed.module.css';
 
@@ -67,32 +68,65 @@ function getDescription(activity) {
   }
 }
 
+/**
+ * Where an activity item should take the user when clicked, or null if it
+ * has nothing to link to. Expenses open their detail view on the group page.
+ */
+function getActivityLink(activity) {
+  const { action, entity_type, entity_id, group_id } = activity;
+  if (!group_id) return null;
+  const base = `/groups/${group_id}`;
+
+  if (entity_type === 'expense' && action !== 'expense_deleted' && entity_id) {
+    return `${base}?expense=${entity_id}`;
+  }
+  if (entity_type === 'payment') return `${base}?tab=balances`;
+  if (entity_type === 'trip' && action !== 'trip_deleted') return `${base}?tab=trips`;
+  return null;
+}
+
 export default function ActivityFeed({ activities, showGroup = false }) {
+  const navigate = useNavigate();
+
   if (!activities || activities.length === 0) {
     return <div className={styles.empty}>No activity yet</div>;
   }
 
   return (
     <div className={styles.feed}>
-      {activities.map(activity => (
-        <div key={activity.id} className={styles.item}>
+      {activities.map(activity => {
+        const link = getActivityLink(activity);
+        const linkProps = link ? {
+          role: 'link',
+          tabIndex: 0,
+          onClick: () => navigate(link),
+          onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') navigate(link); },
+        } : {};
+        return (
           <div
-            className={styles.icon}
-            style={{ color: ACTION_COLORS[activity.action] || 'var(--color-text-secondary)' }}
+            key={activity.id}
+            className={`${styles.item} ${link ? styles.clickable : ''}`}
+            {...linkProps}
           >
-            {ACTION_ICONS[activity.action] || '\u2022'}
-          </div>
-          <div className={styles.content}>
-            <p className={styles.description}>{getDescription(activity)}</p>
-            <div className={styles.meta}>
-              {showGroup && activity.group_name && (
-                <span className={styles.group}>{activity.group_name}</span>
-              )}
-              <span className={styles.time}>{formatRelativeTime(activity.created_at)}</span>
+            <div
+              className={styles.icon}
+              style={{ color: ACTION_COLORS[activity.action] || 'var(--color-text-secondary)' }}
+            >
+              {ACTION_ICONS[activity.action] || '\u2022'}
             </div>
+            <div className={styles.content}>
+              <p className={styles.description}>{getDescription(activity)}</p>
+              <div className={styles.meta}>
+                {showGroup && activity.group_name && (
+                  <span className={styles.group}>{activity.group_name}</span>
+                )}
+                <span className={styles.time}>{formatRelativeTime(activity.created_at)}</span>
+              </div>
+            </div>
+            {link && <span className={styles.chevron} aria-hidden="true">&rsaquo;</span>}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

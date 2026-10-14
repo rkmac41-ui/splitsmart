@@ -36,7 +36,7 @@ router.post('/:groupId/expenses', groupAccess, validate(createExpenseSchema), (r
 // Get expense
 router.get('/:groupId/expenses/:expenseId', groupAccess, (req, res, next) => {
   try {
-    const expense = expenseService.getExpenseById(req.params.expenseId);
+    const expense = expenseService.getExpenseById(req.params.expenseId, req.params.groupId);
     res.json({ expense });
   } catch (err) {
     next(err);
@@ -49,7 +49,8 @@ router.put('/:groupId/expenses/:expenseId', groupAccess, validate(updateExpenseS
     const expense = expenseService.updateExpense(
       req.params.expenseId,
       req.body,
-      req.user.id
+      req.user.id,
+      req.params.groupId
     );
     res.json({ expense });
   } catch (err) {
@@ -60,7 +61,7 @@ router.put('/:groupId/expenses/:expenseId', groupAccess, validate(updateExpenseS
 // Delete expense
 router.delete('/:groupId/expenses/:expenseId', groupAccess, (req, res, next) => {
   try {
-    expenseService.deleteExpense(req.params.expenseId, req.user.id);
+    expenseService.deleteExpense(req.params.expenseId, req.user.id, req.params.groupId);
     res.json({ message: 'Expense deleted' });
   } catch (err) {
     next(err);
