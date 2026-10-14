@@ -62,13 +62,13 @@ export default function TripPage() {
   };
 
   const handleDeleteTrip = async () => {
-    if (!confirm('Delete this trip? Expenses will remain in the group.')) return;
+    if (!confirm('Delete this trip?')) return;
     try {
       await tripsApi.deleteTrip(groupId, tripId);
       showToast('Trip deleted', 'success');
       navigate(`/groups/${groupId}`);
     } catch (err) {
-      showToast('Failed to delete trip', 'error');
+      showToast(err.response?.data?.error || 'Failed to delete trip', 'error');
     }
   };
 

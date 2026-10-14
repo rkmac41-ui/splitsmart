@@ -267,6 +267,17 @@ export default function GroupPage() {
     }
   };
 
+  const handleDeleteTrip = async (trip) => {
+    if (!confirm(`Delete the trip "${trip.name}"?`)) return;
+    try {
+      await tripsApi.deleteTrip(groupId, trip.id);
+      showToast('Trip deleted', 'success');
+      fetchAll();
+    } catch (err) {
+      showToast(err.response?.data?.error || 'Failed to delete trip', 'error');
+    }
+  };
+
   const handleLeaveGroup = async () => {
     if (!confirm('Leave this group?')) return;
     try {
@@ -407,6 +418,7 @@ export default function GroupPage() {
                       onView={setViewingExpense}
                       groupId={groupId}
                       onAddExpense={() => setShowAddExpense(true)}
+                      onDelete={() => handleDeleteTrip(trip)}
                       settled={false}
                     />
                   );
@@ -1067,7 +1079,7 @@ function GroupSettingsContent({ group, members, userId, inviteUrl, onGenerateInv
   );
 }
 
-function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, settled }) {
+function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, onDelete, settled }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -1099,9 +1111,17 @@ function TripAccordion({ trip, tripExpenses, onView, groupId, onAddExpense, sett
           {tripExpenses.length === 0 ? (
             <div className={styles.tripEmptyExpenses}>
               <p>No expenses in this trip</p>
-              <button className={styles.addFirstBtn} onClick={onAddExpense}>
-                Add expense
-              </button>
+              <div className={styles.tripEmptyActions}>
+                <button className={styles.addFirstBtn} onClick={onAddExpense}>
+                  Add expense
+                </button>
+                {/* Only empty trips can be deleted (the server enforces this too) */}
+                {onDelete && (
+                  <button className={styles.deleteTripBtn} onClick={onDelete}>
+                    Delete trip
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             tripExpenses.map(expense => (

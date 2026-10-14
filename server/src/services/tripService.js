@@ -1,5 +1,5 @@
 const db = require('../db/connection');
-const { NotFoundError } = require('../utils/errors');
+const { NotFoundError, ConflictError } = require('../utils/errors');
 const activityService = require('./activityService');
 const notificationService = require('./notificationService');
 
@@ -37,7 +37,7 @@ function getGroupTrips(groupId) {
   `).all(groupId);
 }
 
-function getTripById(tripId) {
+function getTripById(tripId, groupId) {
   const trip = db.prepare(`
     SELECT t.*,
       (SELECT COUNT(*) FROM expenses WHERE trip_id = t.id AND is_deleted = 0) as expense_count,
@@ -46,11 +46,15 @@ function getTripById(tripId) {
     WHERE t.id = ?
   `).get(tripId);
 
-  if (!trip) throw new NotFoundError('Trip not found');
+  // Scope to the caller's group so trips can't be read or changed by guessing IDs
+  if (!trip || (groupId !== undefined && trip.group_id !== Number(groupId))) {
+    throw new NotFoundError('Trip not found');
+  }
   return trip;
 }
 
-function updateTrip(tripId, updates) {
+function updateTrip(tripId, updates, groupId) {
+  getTripById(tripId, groupId);
   const fields = [];
   const values = [];
 
@@ -72,8 +76,18 @@ function updateTrip(tripId, updates) {
   return getTripById(tripId);
 }
 
-function deleteTrip(tripId, userId) {
-  const trip = getTripById(tripId);
+/**
+ * Only an empty trip can be deleted. Deleting a trip with expenses would
+ * silently move them out of the trip, so those must be moved or deleted first.
+ */
+function deleteTrip(tripId, userId, groupId) {
+  const trip = getTripById(tripId, groupId);
+  if (trip.expense_count > 0) {
+    throw new ConflictError(
+      `This trip still has ${trip.expense_count} expense${trip.expense_count === 1 ? '' : 's'}. ` +
+      'Move or delete them before deleting the trip.'
+    );
+  }
 
   db.transaction(() => {
     db.prepare('DELETE FROM trips WHERE id = ?').run(tripId);

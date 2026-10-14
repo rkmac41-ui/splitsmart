@@ -36,7 +36,7 @@ router.post('/:groupId/trips', groupAccess, validate(createTripSchema), (req, re
 // Get trip
 router.get('/:groupId/trips/:tripId', groupAccess, (req, res, next) => {
   try {
-    const trip = tripService.getTripById(req.params.tripId);
+    const trip = tripService.getTripById(req.params.tripId, req.params.groupId);
     res.json({ trip });
   } catch (err) {
     next(err);
@@ -46,7 +46,7 @@ router.get('/:groupId/trips/:tripId', groupAccess, (req, res, next) => {
 // Update trip
 router.put('/:groupId/trips/:tripId', groupAccess, validate(updateTripSchema), (req, res, next) => {
   try {
-    const trip = tripService.updateTrip(req.params.tripId, req.body);
+    const trip = tripService.updateTrip(req.params.tripId, req.body, req.params.groupId);
     res.json({ trip });
   } catch (err) {
     next(err);
@@ -56,7 +56,7 @@ router.put('/:groupId/trips/:tripId', groupAccess, validate(updateTripSchema), (
 // Delete trip
 router.delete('/:groupId/trips/:tripId', groupAccess, (req, res, next) => {
   try {
-    tripService.deleteTrip(req.params.tripId, req.user.id);
+    tripService.deleteTrip(req.params.tripId, req.user.id, req.params.groupId);
     res.json({ message: 'Trip deleted' });
   } catch (err) {
     next(err);
